@@ -6,7 +6,7 @@ import random
 from keep_alive import keep_alive
 from collections import defaultdict
 
-# Intents setup
+# Intents setup (Make sure to enable "Presence", "Server Members", and "Voice States" intents in Discord Developer Portal)
 intents = discord.Intents.default()
 intents.presences = True  # Enables presence updates
 intents.members = True  # Enables member updates
@@ -26,7 +26,7 @@ def load_points():
     if os.path.exists(POINTS_FILE):
         with open(POINTS_FILE, "r") as f:
             return json.load(f)
-    return {}
+    return defaultdict(int)
 
 # Save points
 def save_points(points):
@@ -48,8 +48,8 @@ async def on_ready():
 @bot.event
 async def on_presence_update(before, after):
     """DMs you when a user's status (online/offline) changes."""
-    user = await bot.fetch_user(YOUR_USER_ID)
     if before.status != after.status:
+        user = await bot.fetch_user(YOUR_USER_ID)
         await user.send(f"⚡ **{after.name}** changed status: **{before.status}** → **{after.status}**")
 
 @bot.event
@@ -58,20 +58,17 @@ async def on_voice_state_update(member, before, after):
     guild = member.guild
     general_channel = discord.utils.get(guild.text_channels, name="general")
     
-    before_streaming = getattr(before, "self_stream", False)
-    after_streaming = getattr(after, "self_stream", False)
-
-    if not before_streaming and after_streaming:
+    if before.self_stream is False and after.self_stream is True:
         # User started streaming
-        streaming_users.add(str(member.id))
+        streaming_users.add(member.id)
         await general_channel.send(f"🎥 **{member.name}** has started streaming! Stream point mode enabled!")
     
-    elif before_streaming and not after_streaming:
+    elif before.self_stream is True and after.self_stream is False:
         # User stopped streaming
-        if str(member.id) in streaming_users:
-            points = stream_points.get(str(member.id), 0)
+        if member.id in streaming_users:
+            points = stream_points[member.id]
             await general_channel.send(f"🎥 **{member.name}** has stopped streaming and gained **{points}** points!")
-            streaming_users.remove(str(member.id))
+            streaming_users.remove(member.id)
             save_points(stream_points)  # Save points when user stops streaming
 
 @tasks.loop(seconds=60)
@@ -87,45 +84,67 @@ async def balance(ctx):
     points = stream_points.get(str(ctx.author.id), 0)
     await ctx.send(f"💰 **{ctx.author.name}**, you have **{points}** stream points!")
 
-# Truth or Dare & Would You Rather Questions
+# Truth, Dare, and Would You Rather Questions
 truth_questions = [
     "Have you ever had a crush on someone in this server?",
     "What's your biggest secret?",
     "What's your most embarrassing moment?",
-    "Who do you text the most?",
     "If you could date anyone in this server, who would it be?",
-    "Have you ever lied to your best friend?",
     "What’s the most romantic thing you’ve ever done?",
+    "What’s the most awkward date you’ve been on?",
     "Have you ever had a crush on your best friend?",
     "What’s your biggest fear in a relationship?",
+    "Have you ever had a dream about someone in this server?",
     "If you had to marry someone in this server, who would it be?",
-] * 3  # Expands to 30 questions
+    "Have you ever had a crush on a teacher?",
+    "What’s the worst lie you’ve ever told?",
+    "Have you ever been rejected by someone you liked?",
+    "What’s one thing you love most about your best friend?",
+    "What's your weirdest romantic fantasy?",
+    "If you had to kiss one person in this server, who would it be?",
+    "Have you ever flirted with someone just to make someone else jealous?",
+    "Who was your first crush?",
+    "Have you ever lied to your best friend?",
+    "Would you rather marry your best friend or your crush?",
+    "Have you ever sent a risky text and regretted it?",
+    "What’s the most embarrassing thing you've said to your crush?",
+    "If you had to be handcuffed to one person for a week, who would it be?",
+    "Would you rather date someone funny or someone romantic?",
+]
 
 dare_questions = [
     "Send a voice message saying ‘I love you’ to the last person you texted.",
     "Sing a song in the voice chat.",
     "Say something embarrassing in the general chat.",
     "Call your crush and tell them you like them.",
-    "Change your Discord name to 'I am a potato' for 24 hours.",
-    "Send your last Google search in the chat.",
+    "Let someone in the server write your status for the next hour.",
+    "Send a message to your ex saying ‘I miss you’.",
     "Post an embarrassing photo of yourself.",
+    "Send your last Google search in the chat.",
     "Send a weird selfie to the chat.",
-    "Let someone send a text to your crush from your phone.",
-    "Speak in an accent for the next 5 minutes.",
-] * 3  # Expands to 30 questions
+    "Tell the group your most embarrassing childhood story.",
+    "Post the first picture in your camera roll.",
+    "Say something really cheesy to someone in the server.",
+    "Let someone pick a new nickname for you.",
+    "Send a screenshot of your last DMs.",
+    "Talk like a baby for the next 3 messages.",
+    "Pretend to be a monkey for the next 3 messages.",
+    "Write a love letter to someone in the server.",
+    "Send a message to your crush saying 'You + Me = ❤️'.",
+]
 
 would_you_rather_questions = [
     "Would you rather have unlimited money or unlimited love?",
     "Would you rather always lose or never play?",
-    "Would you rather be famous or be rich?",
-    "Would you rather never use social media again or never watch TV again?",
-    "Would you rather have a time machine or the ability to teleport?",
     "Would you rather go on vacation with your best friend or your crush?",
-    "Would you rather date your best friend or your crush?",
-    "Would you rather get married but never have kids, or have kids but never marry?",
-    "Would you rather live 100 years in the past or 100 years in the future?",
-    "Would you rather have a personal chef or a personal maid?",
-] * 3  # Expands to 30 questions
+    "Would you rather be able to read minds or see the future?",
+    "Would you rather never use social media again or never watch TV again?",
+    "Would you rather kiss your best friend or your crush?",
+    "Would you rather go on a romantic date with your crush or an adventure with your best friend?",
+    "Would you rather be in a long-distance relationship or have to spend 24/7 together?",
+    "Would you rather never fall in love or have your heart broken over and over?",
+    "Would you rather find true love today or win the lottery next year?",
+]
 
 @bot.command()
 async def truth(ctx):
