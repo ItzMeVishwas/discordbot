@@ -6,14 +6,15 @@ import random
 from keep_alive import keep_alive
 from collections import defaultdict
 
-# Intents setup
+# Enable all necessary intents
 intents = discord.Intents.default()
+intents.message_content = True  # ✅ Fix: Ensures bot can read messages
 intents.presences = True
 intents.members = True
 intents.voice_states = True
 
-# Initialize bot
-bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+# Initialize bot with command prefix
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Your Discord user ID (to receive notifications)
 YOUR_USER_ID = 748964469039824937  # Change this to your actual Discord ID
@@ -40,17 +41,19 @@ streaming_users = set()
 @bot.event
 async def on_ready():
     """Bot startup event."""
-    print(f"✅ {bot.user} is online and monitoring status changes!")
+    print(f"✅ {bot.user} is online and ready!")
+    
     user = await bot.fetch_user(YOUR_USER_ID)
     await user.send("✅ Bot is now online and monitoring member status changes and streaming sessions.")
-    add_stream_points.start()
-    await bot.change_presence(activity=discord.Game(name="!truth | !dare | !wouldyourather"))
+    
+    add_stream_points.start()  # Start loop for awarding stream points
+    await bot.change_presence(activity=discord.Game(name="Hehe haha ing"))
 
 @bot.event
 async def on_presence_update(before, after):
     """DMs you when a user's status (online/offline) changes."""
-    user = await bot.fetch_user(YOUR_USER_ID)
     if before.status != after.status:
+        user = await bot.fetch_user(YOUR_USER_ID)
         await user.send(f"⚡ **{after.name}** changed status: **{before.status}** → **{after.status}**")
 
 @bot.event
@@ -83,7 +86,7 @@ async def balance(ctx):
     points = int(stream_points.get(str(ctx.author.id), 0))
     await ctx.send(f"💰 **{ctx.author.name}**, you have **{points}** stream points!")
 
-# Truth or Dare & Would You Rather Questions
+# Truth, Dare & Would You Rather Questions
 truth_questions = [
     "Have you ever had a crush on someone in this server?", "What's your biggest secret?", "Have you ever cheated on a test?",
     "What's your most embarrassing moment?", "If you could date anyone in this server, who would it be?", "What’s the most romantic thing you’ve ever done?",
@@ -115,15 +118,27 @@ would_you_rather_questions = [
 
 @bot.command()
 async def truth(ctx):
+    """Responds with a random truth question."""
     await ctx.send(f"🧐 Truth: {random.choice(truth_questions)}")
 
 @bot.command()
 async def dare(ctx):
+    """Responds with a random dare question."""
     await ctx.send(f"🔥 Dare: {random.choice(dare_questions)}")
 
 @bot.command(name="wouldyourather")
 async def would_you_rather(ctx):
+    """Responds with a random 'Would You Rather' question."""
     await ctx.send(f"🤔 Would You Rather: {random.choice(would_you_rather_questions)}")
+
+# Debugging: Ensures bot processes messages correctly
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return  # Ignore bot messages
+    
+    print(f"📩 Received message: {message.content}")  # Debugging message
+    await bot.process_commands(message)  # Ensures commands still work
 
 keep_alive()
 bot.run(os.getenv("TOKEN"))
