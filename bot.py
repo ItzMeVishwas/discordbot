@@ -22,9 +22,11 @@ streaming_users = set()
 
 @bot.event
 async def on_ready():
+    """Bot startup event."""
     print(f"✅ {bot.user} is online and monitoring status changes!")
     user = await bot.fetch_user(YOUR_USER_ID)
     await user.send("✅ Bot is now online and monitoring member status changes and streaming sessions.")
+    add_stream_points.start()  # ✅ Starts the streaming points loop
 
 @bot.event
 async def on_presence_update(before, after):
@@ -43,6 +45,7 @@ async def on_voice_state_update(member, before, after):
         # User started streaming
         streaming_users.add(member.id)
         await general_channel.send(f"🎥 **{member.name}** has started streaming! Stream point mode enabled!")
+    
     elif before.self_stream is True and after.self_stream is False:
         # User stopped streaming
         if member.id in streaming_users:
