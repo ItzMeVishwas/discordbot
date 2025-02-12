@@ -4,7 +4,7 @@ import os
 from keep_alive import keep_alive
 from collections import defaultdict
 
-# Intents setup (Make sure to enable "Presence", "Server Members", and "Voice States" intents in Discord Developer Portal)
+# Intents setup (Enable "Presence", "Server Members", and "Voice States" intents in Discord Developer Portal)
 intents = discord.Intents.default()
 intents.presences = True  # Enables presence updates
 intents.members = True  # Enables member updates
@@ -16,8 +16,9 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # Replace with your Discord user ID (to receive notifications)
 YOUR_USER_ID = 748964469039824937  # Change this to your actual Discord ID
 
-# Dictionary to track streaming users and their points
-stream_points = defaultdict(int)
+# Dictionaries to track streaming users and their points
+stream_points = defaultdict(int)  # Points for current session
+total_stream_points = defaultdict(int)  # Total points ever earned
 streaming_users = set()
 
 @bot.event
@@ -50,21 +51,24 @@ async def on_voice_state_update(member, before, after):
         # User stopped streaming
         if member.id in streaming_users:
             points = stream_points[member.id]
-            await general_channel.send(f"🎥 **{member.name}** has stopped streaming and gained **{points}** points!")
+            total_stream_points[member.id] += points  # ✅ Add session points to total
+            await general_channel.send(f"🎥 **{member.name}** has stopped streaming and gained **{points}** points! (Total: {total_stream_points[member.id]} points)")
             streaming_users.remove(member.id)
-            stream_points[member.id] = 0
+            stream_points[member.id] = 0  # Reset session points
 
 @tasks.loop(seconds=60)
 async def add_stream_points():
     """Adds 1 point per 60 seconds for users who are streaming."""
     for user_id in streaming_users:
         stream_points[user_id] += 1
+        print(f"✅ Added 1 point to {user_id}, Total in session: {stream_points[user_id]}")
 
 @bot.command()
 async def balance(ctx):
-    """Check the user's stream points."""
-    points = stream_points.get(ctx.author.id, 0)
-    await ctx.send(f"💰 **{ctx.author.name}**, you have **{points}** stream points!")
+    """Check the user's total stream points."""
+    session_points = stream_points[ctx.author.id]
+    total_points = total_stream_points[ctx.author.id]
+    await ctx.send(f"💰 **{ctx.author.name}**, you have **{session_points}** points this session and **{total_points}** total stream points!")
 
 # Keep the bot alive on Render
 keep_alive()
