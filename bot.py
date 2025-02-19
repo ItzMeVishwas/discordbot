@@ -3,6 +3,7 @@ from discord.ext import commands, tasks
 import os
 import json
 import random
+import datetime
 from keep_alive import keep_alive
 from collections import defaultdict
 import logging
@@ -62,6 +63,20 @@ async def on_ready():
         await user.send("✅ Bot is now online and monitoring member status changes and streaming sessions.")
     except Exception as e:
         logger.error("Error sending startup DM: %s", e)
+    
+    # Record the launch time for uptime calculations
+    bot.launch_time = datetime.datetime.utcnow()
+    
+    # Announce in each server's 'general' channel that new code is updated
+    for guild in bot.guilds:
+        general_channel = discord.utils.get(guild.text_channels, name="general")
+        if general_channel:
+            try:
+                await general_channel.send("New code module updated")
+            except Exception as e:
+                logger.error("Could not send update message in %s: %s", guild.name, e)
+        else:
+            logger.warning("No 'general' channel found in guild: %s", guild.name)
     
     add_stream_points.start()  # Start loop for awarding stream points
     await bot.change_presence(activity=discord.Game(name="Hehe haha ing"))
@@ -212,6 +227,82 @@ async def purge(ctx, amount: int):
     else:
         await ctx.send("No messages found to delete.")
 
+# Additional Commands:
+
+@bot.command()
+async def ping(ctx):
+    """Responds with the bot's latency."""
+    latency = round(bot.latency * 1000)
+    await ctx.send(f"Pong! Latency: {latency}ms")
+
+@bot.command()
+async def leaderboard(ctx):
+    """Displays the top 5 users based on their stream points."""
+    # Sort stream_points by points (highest first)
+    sorted_points = sorted(stream_points.items(), key=lambda item: item[1], reverse=True)
+    leaderboard_entries = sorted_points[:5]
+    
+    message = "🏆 **Leaderboard** 🏆\n"
+    rank = 1
+    for user_id, points in leaderboard_entries:
+        try:
+            user = await bot.fetch_user(int(user_id))
+            message += f"{rank}. {user.name} - {points} points\n"
+        except Exception as e:
+            message += f"{rank}. Unknown user - {points} points\n"
+        rank += 1
+    await ctx.send(message)
+
+@bot.command()
+async def serverinfo(ctx):
+    """Displays basic information about the server."""
+    guild = ctx.guild
+    message = (
+        f"**Server Name:** {guild.name}\n"
+        f"**Server ID:** {guild.id}\n"
+        f"**Member Count:** {guild.member_count}\n"
+        f"**Created At:** {guild.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"**Owner:** {guild.owner}"
+    )
+    await ctx.send(message)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def latencycheck(ctx):
+    """
+    Checks the bot's latency and displays it with a pink-themed embed and extra info.
+    This command can only be used in the channel named "latency" by an admin.
+    """
+    if ctx.channel.name != "latency":
+        await ctx.send("This command can only be used in the 'latency' channel.")
+        return
+
+    now = datetime.datetime.utcnow()
+    latency_ms = round(bot.latency * 1000)
+    guild_count = len(bot.guilds)
+    # Calculate uptime
+    uptime_delta = now - bot.launch_time
+    uptime_str = str(uptime_delta).split('.')[0]  # Remove microseconds
+
+    # Generate a random "Bluedox Check" ping between 1 and 50ms
+    bluedox_ping = random.randint(1, 50)
+
+    embed = discord.Embed(
+        title="Latency Check",
+        description="Here is your pink latency info with extra details!",
+        color=0xFF69B4,  # Hot pink color
+        timestamp=now
+    )
+    embed.add_field(name="Websocket Latency", value=f"{latency_ms}ms", inline=False)
+    embed.add_field(name="Server Count", value=f"I'm in {guild_count} servers.", inline=False)
+    embed.add_field(name="Uptime", value=uptime_str, inline=False)
+    # New field: Verify the user who invoked the command
+    embed.add_field(name="User Verification", value=f"{ctx.author.name} - Access Granted", inline=False)
+    embed.add_field(name="Bluedox Check", value=f"{bluedox_ping}ms", inline=False)
+    embed.add_field(name="Note", value="Websocket latency is measured between the bot and Discord's servers. Lower values indicate a more responsive connection.", inline=False)
+    embed.set_footer(text="Latency check provided by your friendly bot.")
+    await ctx.send(embed=embed)
+
 # Debugging: Process messages and log them (avoid spamming in production)
 @bot.event
 async def on_message(message):
@@ -220,9 +311,11 @@ async def on_message(message):
     logger.debug("📩 Received message: %s", message.content)
     await bot.process_commands(message)
 
-# Global error handler for commands
+# Global error handler for commands - it now ignores CommandNotFound errors.
 @bot.event
 async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        return
     logger.error("Error in command '%s': %s", ctx.command, error)
     await ctx.send(f"⚠️ An error occurred: {str(error)}")
 
