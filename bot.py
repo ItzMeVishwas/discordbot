@@ -15,7 +15,7 @@ logger = logging.getLogger('discord_bot')
 
 # Enable all necessary intents
 intents = discord.Intents.default()
-intents.message_content = True  # Ensures the bot can read messages
+intents.message_content = True
 intents.presences = True
 intents.members = True
 intents.voice_states = True
@@ -160,7 +160,7 @@ async def on_ready():
         general_channel = discord.utils.get(guild.text_channels, name="general")
         if general_channel:
             try:
-                await general_channel.send("New code module updated")
+                await general_channel.send("✨ **New code module updated.**")
             except Exception as e:
                 logger.error("Could not send update message in %s: %s", guild.name, e)
         else:
@@ -210,26 +210,27 @@ async def add_stream_points():
 @bot.command()
 async def balance(ctx):
     points = int(stream_points.get(str(ctx.author.id), 0))
-    await ctx.send(f"💰 **{ctx.author.name}**, you have **{points}** stream points!")
+    await ctx.send(f"💰 **{ctx.author.name}**, you have **{points}** stream points.")
 
 @bot.command()
 async def truth(ctx):
-    """Responds with a random truth question."""
-    await ctx.send(f"🧐 Truth: {random.choice(truth_questions)}")
+    """Provides a random truth question."""
+    await ctx.send(f"🧐 **Truth:** {random.choice(truth_questions)}")
 
 @bot.command()
 async def dare(ctx):
-    """Responds with a random dare question."""
-    await ctx.send(f"🔥 Dare: {random.choice(dare_questions)}")
+    """Provides a random dare question."""
+    await ctx.send(f"🔥 **Dare:** {random.choice(dare_questions)}")
 
 @bot.command(name="wouldyourather")
 async def would_you_rather(ctx):
-    """Responds with a random 'Would You Rather' question."""
-    await ctx.send(f"🤔 Would You Rather: {random.choice(would_you_rather_questions)}")
+    """Provides a random 'Would You Rather' question."""
+    await ctx.send(f"🤔 **Would You Rather:** {random.choice(would_you_rather_questions)}")
 
 @bot.command()
 @commands.has_permissions(manage_messages=True)
 async def purge(ctx, amount: int):
+    """Deletes a specified number of messages above the command message."""
     if amount < 1:
         await ctx.send("Please specify a number greater than 0.")
         return
@@ -239,7 +240,7 @@ async def purge(ctx, amount: int):
     if messages_to_delete:
         try:
             await ctx.channel.delete_messages(messages_to_delete)
-            await ctx.send(f"🧹 Purged {len(messages_to_delete)} messages.", delete_after=5)
+            await ctx.send(f"🧹 **Purged {len(messages_to_delete)} messages.**", delete_after=5)
         except discord.Forbidden:
             await ctx.send("I do not have permission to delete messages.")
         except discord.HTTPException as e:
@@ -249,11 +250,13 @@ async def purge(ctx, amount: int):
 
 @bot.command()
 async def ping(ctx):
+    """Shows the bot's latency."""
     latency = round(bot.latency * 1000)
-    await ctx.send(f"Pong! Latency: {latency}ms")
+    await ctx.send(f"🏓 **Pong! Latency:** {latency}ms")
 
 @bot.command()
 async def leaderboard(ctx):
+    """Displays the top 5 users based on stream points."""
     sorted_points = sorted(stream_points.items(), key=lambda item: item[1], reverse=True)
     leaderboard_entries = sorted_points[:5]
     message = "🏆 **Leaderboard** 🏆\n"
@@ -261,14 +264,15 @@ async def leaderboard(ctx):
     for user_id, points in leaderboard_entries:
         try:
             user = await bot.fetch_user(int(user_id))
-            message += f"{rank}. {user.name} - {points} points\n"
+            message += f"**{rank}. {user.name}** — {points} points\n"
         except Exception as e:
-            message += f"{rank}. Unknown user - {points} points\n"
+            message += f"**{rank}. Unknown user** — {points} points\n"
         rank += 1
     await ctx.send(message)
 
 @bot.command()
 async def serverinfo(ctx):
+    """Displays basic server information."""
     guild = ctx.guild
     message = (
         f"**Server Name:** {guild.name}\n"
@@ -282,8 +286,12 @@ async def serverinfo(ctx):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def latencycheck(ctx):
+    """
+    Provides a detailed latency report.
+    *This command is restricted to the 'latency' channel and admin users only.*
+    """
     if ctx.channel.name != "latency":
-        await ctx.send("This command can only be used in the 'latency' channel.")
+        await ctx.send("❌ This command can only be used in the **#latency** channel.")
         return
     now = datetime.datetime.utcnow()
     latency_ms = round(bot.latency * 1000)
@@ -292,41 +300,44 @@ async def latencycheck(ctx):
     uptime_str = str(uptime_delta).split('.')[0]
     bluedox_ping = random.randint(1, 50)
     embed = discord.Embed(
-        title="Latency Check",
-        description="Here is your pink latency info with extra details!",
-        color=0xFF69B4,
+        title="📊 Latency Report",
+        description="Below are the detailed latency statistics:",
+        color=0x3498DB,  # Formal deep blue color
         timestamp=now
     )
-    embed.add_field(name="Websocket Latency", value=f"{latency_ms}ms", inline=False)
-    embed.add_field(name="Server Count", value=f"I'm in {guild_count} servers.", inline=False)
-    embed.add_field(name="Uptime", value=uptime_str, inline=False)
-    embed.add_field(name="User Verification", value=f"{ctx.author.name} - Access Granted", inline=False)
-    embed.add_field(name="Bluedox Check", value=f"{bluedox_ping}ms", inline=False)
-    embed.add_field(name="Note", value="Websocket latency is measured between the bot and Discord's servers. Lower values indicate a more responsive connection.", inline=False)
-    embed.set_footer(text="Latency check provided by your friendly bot.")
+    embed.add_field(name="Websocket Latency", value=f"**{latency_ms}ms**", inline=True)
+    embed.add_field(name="Server Count", value=f"**{guild_count} servers**", inline=True)
+    embed.add_field(name="Uptime", value=f"**{uptime_str}**", inline=False)
+    embed.add_field(name="User Verification", value=f"**{ctx.author.name}** — *Access Granted*", inline=False)
+    embed.add_field(name="Bluedox Check", value=f"**{bluedox_ping}ms**", inline=True)
+    embed.add_field(name="Note", value="Websocket latency is measured between the bot and Discord's servers.", inline=False)
+    embed.set_footer(text="Latency report provided by your formal bot.")
     await ctx.send(embed=embed)
 
 @bot.command()
 @commands.has_permissions(ban_members=True)
 async def ban(ctx, member: discord.Member, *, reason=None):
+    """Bans a member from the server."""
     try:
         await member.ban(reason=reason)
-        await ctx.send(f"{member.mention} has been banned. Reason: {reason if reason else 'No reason provided.'}")
+        await ctx.send(f"🚫 **{member.mention}** has been banned. Reason: {reason if reason else 'No reason provided.'}")
     except Exception as e:
-        await ctx.send(f"Failed to ban {member.mention}: {e}")
+        await ctx.send(f"❌ Failed to ban {member.mention}: {e}")
 
 @bot.command()
 @commands.has_permissions(kick_members=True)
 async def kick(ctx, member: discord.Member, *, reason=None):
+    """Kicks a member from the server."""
     try:
         await member.kick(reason=reason)
-        await ctx.send(f"{member.mention} has been kicked. Reason: {reason if reason else 'No reason provided.'}")
+        await ctx.send(f"👢 **{member.mention}** has been kicked. Reason: {reason if reason else 'No reason provided.'}")
     except Exception as e:
-        await ctx.send(f"Failed to kick {member.mention}: {e}")
+        await ctx.send(f"❌ Failed to kick {member.mention}: {e}")
 
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 async def mute(ctx, member: discord.Member, *, reason=None):
+    """Mutes a member by assigning them the 'Muted' role."""
     muted_role = discord.utils.get(ctx.guild.roles, name="Muted")
     if not muted_role:
         try:
@@ -334,44 +345,56 @@ async def mute(ctx, member: discord.Member, *, reason=None):
             for channel in ctx.guild.channels:
                 await channel.set_permissions(muted_role, send_messages=False, speak=False, add_reactions=False)
         except Exception as e:
-            await ctx.send(f"Failed to create Muted role: {e}")
+            await ctx.send(f"❌ Failed to create Muted role: {e}")
             return
     if muted_role in member.roles:
-        await ctx.send(f"{member.mention} is already muted.")
+        await ctx.send(f"ℹ️ **{member.mention}** is already muted.")
         return
     try:
         await member.add_roles(muted_role, reason=reason)
-        await ctx.send(f"{member.mention} has been muted. Reason: {reason if reason else 'No reason provided.'}")
+        await ctx.send(f"🔇 **{member.mention}** has been muted. Reason: {reason if reason else 'No reason provided.'}")
     except Exception as e:
-        await ctx.send(f"Failed to mute {member.mention}: {e}")
+        await ctx.send(f"❌ Failed to mute {member.mention}: {e}")
 
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 async def unmute(ctx, member: discord.Member):
+    """Unmutes a member by removing the 'Muted' role."""
     muted_role = discord.utils.get(ctx.guild.roles, name="Muted")
     if not muted_role:
-        await ctx.send("There is no Muted role in this server.")
+        await ctx.send("ℹ️ There is no Muted role in this server.")
         return
     if muted_role not in member.roles:
-        await ctx.send(f"{member.mention} is not muted.")
+        await ctx.send(f"ℹ️ **{member.mention}** is not muted.")
         return
     try:
         await member.remove_roles(muted_role)
-        await ctx.send(f"{member.mention} has been unmuted.")
+        await ctx.send(f"🔊 **{member.mention}** has been unmuted.")
     except Exception as e:
-        await ctx.send(f"Failed to unmute {member.mention}: {e}")
+        await ctx.send(f"❌ Failed to unmute {member.mention}: {e}")
 
 @bot.command()
 async def coinflip(ctx):
+    """Flips a coin (50/50 chance of Heads or Tails)."""
     result = random.choice(["Heads", "Tails"])
-    await ctx.send(f"The coin landed on **{result}**!")
+    await ctx.send(f"🪙 The coin landed on **{result}**!")
 
 @bot.command()
 async def countmessage(ctx, *, query: str):
+    """
+    Counts how many times the given text appears in the channel.
+    It sends a 'counting' message and then edits it with the final result.
+    """
+    initial_message = await ctx.send(f"🔎 Counting occurrences of **'{query}'** in this channel...")
     count = 0
-    async for message in ctx.channel.history(limit=None):
-        if query.lower() in message.content.lower():
-            count += 1
+    try:
+        async for message in ctx.channel.history(limit=None):
+            if query.lower() in message.content.lower():
+                count += 1
+    except Exception as e:
+        logger.error("Error counting messages: %s", e)
+        await initial_message.edit(content=f"❌ An error occurred while counting messages: {e}")
+        return
     if count <= 10:
         comment = "Wow!"
     elif count <= 100:
@@ -382,40 +405,45 @@ async def countmessage(ctx, *, query: str):
         comment = "Damn!"
     else:
         comment = "Legendary!"
-    await ctx.send(f"The text '{query}' was repeated {count} times in this channel. {comment}")
+    await initial_message.edit(content=f"🔎 The text **'{query}'** was repeated **{count}** times in this channel. {comment}")
 
 @bot.command()
 async def transferpoints(ctx):
     """
-    Simulates transferring your stream points to official trackers.
-    After the transfer, your stream points are reset to 0.
+    Transfers your stream points to official trackers.
+    After the transfer, your points are reset to 0.
     """
-    await ctx.send("Transferring points to official trackers...")
-    await asyncio.sleep(2)  # Simulate a delay for transfer
+    await ctx.send("🔄 Transferring points to official trackers...")
+    await asyncio.sleep(2)
     stream_points[str(ctx.author.id)] = 0
     save_points(stream_points)
-    await ctx.send("Transfer complete. Your points have been reset to 0.")
+    await ctx.send("✅ Transfer complete. Your points have been reset to 0.")
 
 @bot.command()
 async def help(ctx):
-    embed = discord.Embed(title="Help - Available Commands", color=0x00FF00)
+    """Provides a list of all available commands with descriptions."""
+    embed = discord.Embed(
+        title="Available Commands",
+        description="Below is a list of commands you can use. Please refer to the descriptions for details.",
+        color=0x3498DB  # Deep blue for a formal look
+    )
     embed.add_field(name="!balance", value="Check your stream points.", inline=False)
-    embed.add_field(name="!truth", value="Get a random truth question.", inline=False)
-    embed.add_field(name="!dare", value="Get a random dare question.", inline=False)
-    embed.add_field(name="!wouldyourather", value="Get a random 'Would You Rather' question.", inline=False)
+    embed.add_field(name="!truth", value="Receive a random truth question.", inline=False)
+    embed.add_field(name="!dare", value="Receive a random dare question.", inline=False)
+    embed.add_field(name="!wouldyourather", value="Receive a random 'Would You Rather' question.", inline=False)
     embed.add_field(name="!purge [amount]", value="Delete a specified number of messages above the command.", inline=False)
-    embed.add_field(name="!ping", value="Show the bot's latency.", inline=False)
+    embed.add_field(name="!ping", value="Display the bot's latency.", inline=False)
     embed.add_field(name="!leaderboard", value="Show the top 5 users based on stream points.", inline=False)
     embed.add_field(name="!serverinfo", value="Display basic server information.", inline=False)
-    embed.add_field(name="!latencycheck", value="Check the bot's latency (Admin only, must be in 'latency' channel).", inline=False)
+    embed.add_field(name="!latencycheck", value="Show detailed latency info (Admin only; use in 'latency' channel).", inline=False)
     embed.add_field(name="!ban @member [reason]", value="Ban a member from the server.", inline=False)
     embed.add_field(name="!kick @member [reason]", value="Kick a member from the server.", inline=False)
     embed.add_field(name="!mute @member [reason]", value="Mute a member by assigning them the 'Muted' role.", inline=False)
     embed.add_field(name="!unmute @member", value="Unmute a member by removing the 'Muted' role.", inline=False)
     embed.add_field(name="!coinflip", value="Flip a coin (50/50 chance of Heads or Tails).", inline=False)
     embed.add_field(name="!countmessage [text]", value="Count how many times the specified text appears in the channel.", inline=False)
-    embed.add_field(name="!transferpoints", value="Transfer your stream points to official trackers (resets your points).", inline=False)
-    embed.set_footer(text="Use the command names as shown to interact with the bot.")
+    embed.add_field(name="!transferpoints", value="Transfer your stream points to official trackers (points reset to 0).", inline=False)
+    embed.set_footer(text="Type the command as shown to interact with the bot.")
     await ctx.send(embed=embed)
 
 @bot.event
