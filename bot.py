@@ -6,7 +6,7 @@ import random
 import datetime
 import asyncio
 import openai
-from keep_alive import keep_alive  # Ensure this file is in your repository if used
+from keep_alive import keep_alive
 from collections import defaultdict
 import logging
 
@@ -19,7 +19,7 @@ logger = logging.getLogger('discord_bot')
 
 # Enable all necessary intents
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = True  # Ensures the bot can read messages
 intents.presences = True
 intents.members = True
 intents.voice_states = True
@@ -306,7 +306,7 @@ async def latencycheck(ctx):
     embed = discord.Embed(
         title="📊 Latency Report",
         description="Below are the detailed latency statistics:",
-        color=0x3498DB,  # Deep blue for a formal look
+        color=0x3498DB,
         timestamp=now
     )
     embed.add_field(name="Websocket Latency", value=f"**{latency_ms}ms**", inline=True)
@@ -431,13 +431,13 @@ async def ask(ctx, *, question: str):
     """
     await ctx.send("🤖 Thinking...")
     try:
-        response = openai.Completion.create(
-            engine="text-davinci-003",
-            prompt=question,
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": question}],
             max_tokens=150,
             temperature=0.7,
         )
-        answer = response.choices[0].text.strip()
+        answer = response.choices[0].message['content'].strip()
         await ctx.send(f"**Answer:** {answer}")
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
