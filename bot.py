@@ -5,9 +5,13 @@ import json
 import random
 import datetime
 import asyncio
-from keep_alive import keep_alive
+import openai
+from keep_alive import keep_alive  # Ensure this file is in your repository if used
 from collections import defaultdict
 import logging
+
+# Set OpenAI API key from environment variable
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -15,7 +19,7 @@ logger = logging.getLogger('discord_bot')
 
 # Enable all necessary intents
 intents = discord.Intents.default()
-intents.message_content = True  # Ensures the bot can read messages
+intents.message_content = True
 intents.presences = True
 intents.members = True
 intents.voice_states = True
@@ -23,7 +27,7 @@ intents.voice_states = True
 # Initialize bot with command prefix and disable default help command
 bot = commands.Bot(command_prefix="!", help_command=None, intents=intents)
 
-YOUR_USER_ID = 748964469039824937  # Change this to your actual Discord ID
+YOUR_USER_ID = 748964469039824937  # Replace with your actual Discord ID
 POINTS_FILE = "stream_points.json"
 
 def load_points():
@@ -420,6 +424,25 @@ async def transferpoints(ctx):
     await ctx.send("✅ Transfer complete. Your points have been reset to 0.")
 
 @bot.command()
+async def ask(ctx, *, question: str):
+    """
+    Ask a question and get an answer from AI.
+    Ensure that your OPENAI_API_KEY is set in your environment variables.
+    """
+    await ctx.send("🤖 Thinking...")
+    try:
+        response = openai.Completion.create(
+            engine="text-davinci-003",
+            prompt=question,
+            max_tokens=150,
+            temperature=0.7,
+        )
+        answer = response.choices[0].text.strip()
+        await ctx.send(f"**Answer:** {answer}")
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
+@bot.command()
 async def help(ctx):
     """Provides a list of all available commands with descriptions."""
     embed = discord.Embed(
@@ -443,6 +466,7 @@ async def help(ctx):
     embed.add_field(name="!coinflip", value="Flip a coin (50/50 chance of Heads or Tails).", inline=False)
     embed.add_field(name="!countmessage [text]", value="Count how many times the specified text appears in the channel.", inline=False)
     embed.add_field(name="!transferpoints", value="Transfer your stream points to official trackers (resets your points).", inline=False)
+    embed.add_field(name="!ask [question]", value="Ask a question and receive an AI-generated answer.", inline=False)
     embed.set_footer(text="Type the command as shown to interact with the bot. Provided by your mahiru.")
     await ctx.send(embed=embed)
 
