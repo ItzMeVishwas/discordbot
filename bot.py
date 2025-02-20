@@ -147,7 +147,6 @@ would_you_rather_questions = [
     "Would you rather always know when someone is lying or always get away with lying?"
 ]
 
-# Event: on_ready
 @bot.event
 async def on_ready():
     logger.info("✅ %s is online and ready!", bot.user)
@@ -437,17 +436,33 @@ async def ask(ctx, *, question: str):
     headers = {"Authorization": f"Bearer {hf_api_key}"}
     model = "gpt2"  # Change to a different model if desired
     url = f"https://api-inference.huggingface.co/models/{model}"
-    try:
-        response = requests.post(url, headers=headers, json={"inputs": question})
-        if response.status_code != 200:
-            await ctx.send(f"❌ Error from Hugging Face API: {response.status_code} {response.text}")
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(url, headers=headers, json={"inputs": question}, timeout=60)
+            if response.status_code == 200:
+                output = response.json()
+                answer = output[0].get("generated_text", "No answer generated.")
+                if len(answer) > 4000:
+                    answer = answer[:3990] + "..."
+                await ctx.send(f"**Answer:** {answer}")
+                return
+            elif response.status_code == 500:
+                error_data = response.json()
+                if "Model too busy" in error_data.get("error", ""):
+                    await ctx.send("⚠️ Model is busy, retrying...")
+                    await asyncio.sleep(10)
+                    continue
+                else:
+                    await ctx.send(f"❌ Error from Hugging Face API: {response.status_code} {response.text}")
+                    return
+            else:
+                await ctx.send(f"❌ Error from Hugging Face API: {response.status_code} {response.text}")
+                return
+        except Exception as e:
+            await ctx.send(f"❌ Error: {e}")
             return
-        output = response.json()
-        # Retrieve generated text from the first result
-        answer = output[0].get("generated_text", "No answer generated.")
-        await ctx.send(f"**Answer:** {answer}")
-    except Exception as e:
-        await ctx.send(f"❌ Error: {e}")
+    await ctx.send("❌ Failed to get a response from the model after multiple attempts.")
 
 @bot.command()
 async def help(ctx):
