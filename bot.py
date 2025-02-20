@@ -443,10 +443,12 @@ async def ask(ctx, *, question: str):
             if response.status_code == 200:
                 output = response.json()
                 answer = output[0].get("generated_text", "No answer generated.")
-                # Truncate answer if it exceeds Discord's message limit (2000 characters)
-                if len(answer) > 2000:
-                    answer = answer[:1990] + "..."
-                await ctx.send(f"**Answer:** {answer}")
+                prefix = "**Answer:** "
+                max_length = 2000 - len(prefix)
+                if len(answer) > max_length:
+                    answer = answer[:max_length - 3] + "..."
+                final_msg = prefix + answer
+                await ctx.send(final_msg)
                 return
             elif response.status_code == 500:
                 error_data = response.json()
