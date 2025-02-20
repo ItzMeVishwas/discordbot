@@ -15,7 +15,7 @@ logger = logging.getLogger('discord_bot')
 
 # Enable all necessary intents
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = True  # Ensures the bot can read messages
 intents.presences = True
 intents.members = True
 intents.voice_states = True
@@ -302,7 +302,7 @@ async def latencycheck(ctx):
     embed = discord.Embed(
         title="📊 Latency Report",
         description="Below are the detailed latency statistics:",
-        color=0x3498DB,  # Formal deep blue color
+        color=0x3498DB,  # Deep blue for a formal look
         timestamp=now
     )
     embed.add_field(name="Websocket Latency", value=f"**{latency_ms}ms**", inline=True)
@@ -311,7 +311,7 @@ async def latencycheck(ctx):
     embed.add_field(name="User Verification", value=f"**{ctx.author.name}** — *Access Granted*", inline=False)
     embed.add_field(name="Bluedox Check", value=f"**{bluedox_ping}ms**", inline=True)
     embed.add_field(name="Note", value="Websocket latency is measured between the bot and Discord's servers.", inline=False)
-    embed.set_footer(text="Latency report provided by your formal bot.")
+    embed.set_footer(text="Latency report provided by your mahiru.")
     await ctx.send(embed=embed)
 
 @bot.command()
@@ -425,7 +425,7 @@ async def help(ctx):
     embed = discord.Embed(
         title="Available Commands",
         description="Below is a list of commands you can use. Please refer to the descriptions for details.",
-        color=0x3498DB  # Deep blue for a formal look
+        color=0x3498DB
     )
     embed.add_field(name="!balance", value="Check your stream points.", inline=False)
     embed.add_field(name="!truth", value="Receive a random truth question.", inline=False)
@@ -442,8 +442,8 @@ async def help(ctx):
     embed.add_field(name="!unmute @member", value="Unmute a member by removing the 'Muted' role.", inline=False)
     embed.add_field(name="!coinflip", value="Flip a coin (50/50 chance of Heads or Tails).", inline=False)
     embed.add_field(name="!countmessage [text]", value="Count how many times the specified text appears in the channel.", inline=False)
-    embed.add_field(name="!transferpoints", value="Transfer your stream points to official trackers (points reset to 0).", inline=False)
-    embed.set_footer(text="Type the command as shown to interact with the bot.")
+    embed.add_field(name="!transferpoints", value="Transfer your stream points to official trackers (resets your points).", inline=False)
+    embed.set_footer(text="Type the command as shown to interact with the bot. Provided by your mahiru.")
     await ctx.send(embed=embed)
 
 @bot.event
