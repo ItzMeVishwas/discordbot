@@ -5,21 +5,18 @@ import json
 import random
 import datetime
 import asyncio
-import openai
+import requests
 from keep_alive import keep_alive
 from collections import defaultdict
 import logging
-
-# Set OpenAI API key from environment variable
-openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('discord_bot')
 
-# Enable all necessary intents
+# Enable necessary intents
 intents = discord.Intents.default()
-intents.message_content = True  # Ensures the bot can read messages
+intents.message_content = True  # Allows the bot to read messages
 intents.presences = True
 intents.members = True
 intents.voice_states = True
@@ -426,18 +423,25 @@ async def transferpoints(ctx):
 @bot.command()
 async def ask(ctx, *, question: str):
     """
-    Ask a question and get an answer from AI.
-    Ensure that your OPENAI_API_KEY is set in your environment variables.
+    Ask a question and get an AI-generated answer using Hugging Face's Inference API.
+    Ensure that your HF_API_KEY is set in your environment variables.
     """
     await ctx.send("🤖 Thinking...")
+    hf_api_key = os.getenv("HF_API_KEY")
+    if not hf_api_key:
+        await ctx.send("❌ HF_API_KEY is not set. Please set it in your environment variables.")
+        return
+    headers = {"Authorization": f"Bearer {hf_api_key}"}
+    model = "gpt2"  # You can change to a different model if desired
+    url = f"https://api-inference.huggingface.co/models/{model}"
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": question}],
-            max_tokens=150,
-            temperature=0.7,
-        )
-        answer = response.choices[0].message['content'].strip()
+        response = requests.post(url, headers=headers, json={"inputs": question})
+        if response.status_code != 200:
+            await ctx.send(f"❌ Error from Hugging Face API: {response.status_code} {response.text}")
+            return
+        output = response.json()
+        # Retrieve generated text from the first result
+        answer = output[0].get("generated_text", "No answer generated.")
         await ctx.send(f"**Answer:** {answer}")
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
