@@ -426,13 +426,16 @@ async def ask(ctx, *, question: str):
     Ask a question and get an AI-generated answer using Hugging Face's Inference API.
     Ensure that your HF_API_KEY is set in your environment variables.
     """
-    await ctx.send("🤖 Thinking...")
+    # Debug print to check API key length
     hf_api_key = os.getenv("HF_API_KEY")
+    print("HF_API_KEY length:", len(hf_api_key) if hf_api_key else "Not set")
+    
+    await ctx.send("🤖 Thinking...")
     if not hf_api_key:
         await ctx.send("❌ HF_API_KEY is not set. Please set it in your environment variables.")
         return
     headers = {"Authorization": f"Bearer {hf_api_key}"}
-    model = "gpt2"  # You can change to a different model if desired
+    model = "gpt2"  # Change to a different model if desired
     url = f"https://api-inference.huggingface.co/models/{model}"
     try:
         response = requests.post(url, headers=headers, json={"inputs": question})
@@ -470,7 +473,7 @@ async def help(ctx):
     embed.add_field(name="!coinflip", value="Flip a coin (50/50 chance of Heads or Tails).", inline=False)
     embed.add_field(name="!countmessage [text]", value="Count how many times the specified text appears in the channel.", inline=False)
     embed.add_field(name="!transferpoints", value="Transfer your stream points to official trackers (resets your points).", inline=False)
-    embed.add_field(name="!ask [question]", value="Ask a question and receive an AI-generated answer.", inline=False)
+    embed.add_field(name="!ask [question]", value="Ask a question and receive an AI-generated answer using Hugging Face.", inline=False)
     embed.set_footer(text="Type the command as shown to interact with the bot. Provided by your mahiru.")
     await ctx.send(embed=embed)
 
