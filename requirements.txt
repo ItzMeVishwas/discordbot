@@ -1,5 +1,5 @@
 discord.py
 flask
-openai==0.28.0
+requests
 aiohttp
 asyncio
