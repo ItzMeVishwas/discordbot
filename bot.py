@@ -443,8 +443,9 @@ async def ask(ctx, *, question: str):
             if response.status_code == 200:
                 output = response.json()
                 answer = output[0].get("generated_text", "No answer generated.")
-                if len(answer) > 4000:
-                    answer = answer[:3990] + "..."
+                # Truncate answer if it exceeds Discord's message limit (2000 characters)
+                if len(answer) > 2000:
+                    answer = answer[:1990] + "..."
                 await ctx.send(f"**Answer:** {answer}")
                 return
             elif response.status_code == 500:
