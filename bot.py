@@ -420,54 +420,6 @@ async def transferpoints(ctx):
     await ctx.send("✅ Transfer complete. Your points have been reset to 0.")
 
 @bot.command()
-async def ask(ctx, *, question: str):
-    """
-    Ask a question and get an AI-generated answer using Hugging Face's Inference API.
-    Ensure that your HF_API_KEY is set in your environment variables.
-    """
-    # Debug print to check API key length
-    hf_api_key = os.getenv("HF_API_KEY")
-    print("HF_API_KEY length:", len(hf_api_key) if hf_api_key else "Not set")
-    
-    await ctx.send("🤖 Thinking...")
-    if not hf_api_key:
-        await ctx.send("❌ HF_API_KEY is not set. Please set it in your environment variables.")
-        return
-    headers = {"Authorization": f"Bearer {hf_api_key}"}
-    model = "gpt2"  # Change to a different model if desired
-    url = f"https://api-inference.huggingface.co/models/{model}"
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            response = requests.post(url, headers=headers, json={"inputs": question}, timeout=60)
-            if response.status_code == 200:
-                output = response.json()
-                answer = output[0].get("generated_text", "No answer generated.")
-                prefix = "**Answer:** "
-                max_length = 2000 - len(prefix)
-                if len(answer) > max_length:
-                    answer = answer[:max_length - 3] + "..."
-                final_msg = prefix + answer
-                await ctx.send(final_msg)
-                return
-            elif response.status_code == 500:
-                error_data = response.json()
-                if "Model too busy" in error_data.get("error", ""):
-                    await ctx.send("⚠️ Model is busy, retrying...")
-                    await asyncio.sleep(10)
-                    continue
-                else:
-                    await ctx.send(f"❌ Error from Hugging Face API: {response.status_code} {response.text}")
-                    return
-            else:
-                await ctx.send(f"❌ Error from Hugging Face API: {response.status_code} {response.text}")
-                return
-        except Exception as e:
-            await ctx.send(f"❌ Error: {e}")
-            return
-    await ctx.send("❌ Failed to get a response from the model after multiple attempts.")
-
-@bot.command()
 async def help(ctx):
     """Provides a list of all available commands with descriptions."""
     embed = discord.Embed(
@@ -491,7 +443,6 @@ async def help(ctx):
     embed.add_field(name="!coinflip", value="Flip a coin (50/50 chance of Heads or Tails).", inline=False)
     embed.add_field(name="!countmessage [text]", value="Count how many times the specified text appears in the channel.", inline=False)
     embed.add_field(name="!transferpoints", value="Transfer your stream points to official trackers (resets your points).", inline=False)
-    embed.add_field(name="!ask [question]", value="Ask a question and receive an AI-generated answer using Hugging Face.", inline=False)
     embed.set_footer(text="Type the command as shown to interact with the bot. Provided by your mahiru.")
     await ctx.send(embed=embed)
 
