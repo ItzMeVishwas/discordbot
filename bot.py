@@ -10,8 +10,8 @@ from keep_alive import keep_alive
 from collections import defaultdict, deque
 import logging
 
-# Music dependencies
-import youtube_dl
+# Use yt_dlp instead of youtube_dl for more reliable downloads
+import yt_dlp as youtube_dl
 from spotipy import Spotify
 from spotipy.oauth2 import SpotifyClientCredentials
 
@@ -29,11 +29,10 @@ intents.voice_states = True
 # Initialize bot
 bot = commands.Bot(command_prefix="!", help_command=None, intents=intents)
 
-YOUR_USER_ID = 748964469039824937  # Replace with your Discord ID
+YOUR_USER_ID = 748964469039824937
 POINTS_FILE = "stream_points.json"
 
 # --- Stream‑points persistence ---
-
 def load_points():
     if os.path.exists(POINTS_FILE):
         try:
@@ -56,11 +55,10 @@ streaming_users = set()
 session_start_points = {}
 
 # --- Music playback state ---
-
 music_queues = {}    # guild_id -> deque of queries
 current_track = {}   # guild_id -> title of currently playing track
 
-# Spotify client (requires SPOTIFY_CLIENT_ID & SPOTIFY_CLIENT_SECRET in env)
+# Spotify client (Client Credentials flow)
 spotify = Spotify(
     auth_manager=SpotifyClientCredentials(
         client_id=os.getenv("SPOTIFY_CLIENT_ID"),
@@ -68,12 +66,15 @@ spotify = Spotify(
     )
 )
 
-# youtube_dl & ffmpeg options
+# yt-dlp & ffmpeg options
 ytdl_format_options = {
     "format": "bestaudio/best",
     "noplaylist": True,
     "quiet": True,
     "default_search": "auto",
+    "source_address": "0.0.0.0",  # bind to IPv4
+    "nocheckcertificate": True,
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
 ffmpeg_options = {"options": "-vn"}
 ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
@@ -86,10 +87,16 @@ class YTDLSource(discord.PCMVolumeTransformer):
     @classmethod
     async def from_query(cls, query, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(query, download=not stream))
+        data = await loop.run_in_executor(
+            None,
+            lambda: ytdl.extract_info(query, download=not stream)
+        )
         if "entries" in data:
             data = data["entries"][0]
-        return cls(discord.FFmpegPCMAudio(data["url"], **ffmpeg_options), data=data)
+        return cls(
+            discord.FFmpegPCMAudio(data["url"], **ffmpeg_options),
+            data=data
+        )
 
 # --- Question lists ---
 
@@ -256,14 +263,17 @@ async def balance(ctx):
 
 @bot.command()
 async def truth(ctx):
+    """Random truth question."""
     await ctx.send(f"🧐 **Truth:** {random.choice(truth_questions)}")
 
 @bot.command()
 async def dare(ctx):
+    """Random dare prompt."""
     await ctx.send(f"🔥 **Dare:** {random.choice(dare_questions)}")
 
 @bot.command(name="wouldyourather")
 async def would_you_rather(ctx):
+    """Random Would You Rather question."""
     await ctx.send(f"🤔 **Would You Rather:** {random.choice(would_you_rather_questions)}")
 
 @bot.command()
@@ -318,9 +328,7 @@ async def latencycheck(ctx):
     uptime = now - bot.launch_time
     embed = discord.Embed(
         title="📊 Latency Report",
-        description="Details below:",
-        color=0x3498DB,
-        timestamp=now
+        description="Details below:", color=0x3498DB, timestamp=now
     )
     embed.add_field(name="Websocket Latency", value=f"{round(bot.latency*1000)}ms", inline=True)
     embed.add_field(name="Server Count", value=f"{len(bot.guilds)}", inline=True)
@@ -380,11 +388,13 @@ async def countmessage(ctx, *, query: str):
     async for m in ctx.channel.history(limit=None):
         if query.lower() in m.content.lower():
             cnt += 1
-    comment = ("Wow!" if cnt<=10 else
-               "Amazing!" if cnt<=100 else
-               "Crazy!" if cnt<=150 else
-               "Damn!" if cnt<=200 else
-               "Legendary!")
+    comment = (
+        "Wow!" if cnt<=10 else
+        "Amazing!" if cnt<=100 else
+        "Crazy!" if cnt<=150 else
+        "Damn!" if cnt<=200 else
+        "Legendary!"
+    )
     await msg.edit(content=f"🔎 Found **{cnt}** occurrences of `{query}`. {comment}")
 
 @bot.command()
@@ -520,32 +530,3 @@ async def resume(ctx):
     if vc and vc.is_paused():
         vc.resume()
         await ctx.send("▶️ Resumed.")
-    else:
-        await ctx.send("Nothing is paused.")
-
-@bot.command(name="current")
-async def current(ctx):
-    title = current_track.get(ctx.guild.id)
-    if title:
-        await ctx.send(f"🎶 Now playing: **{title}**")
-    else:
-        await ctx.send("Nothing is playing right now.")
-
-# --- Message handling & error logging ---
-
-@bot.event
-async def on_message(message):
-    if message.author == bot.user:
-        return
-    logger.debug("📩 %s", message.content)
-    await bot.process_commands(message)
-
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandNotFound):
-        return
-    logger.error("Error in '%s': %s", ctx.command, error)
-    await ctx.send(f"⚠️ An error occurred: {error}")
-
-keep_alive()
-bot.run(os.getenv("TOKEN"))
