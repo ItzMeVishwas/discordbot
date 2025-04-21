@@ -3,6 +3,3 @@ flask
 requests
 aiohttp
 asyncio
-spotipy
-yt-dlp
-PyNaCl
