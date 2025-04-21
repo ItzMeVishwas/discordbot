@@ -32,8 +32,7 @@ bot = commands.Bot(command_prefix="!", help_command=None, intents=intents)
 YOUR_USER_ID = 748964469039824937  # Replace with your actual Discord ID
 POINTS_FILE = "stream_points.json"
 
-# --- Stream‐points persistence ---
-
+# Persistent stream-points storage
 def load_points():
     if os.path.exists(POINTS_FILE):
         try:
@@ -55,8 +54,42 @@ stream_points = defaultdict(int, load_points())
 streaming_users = set()
 session_start_points = {}
 
-# --- Question lists ---
+# Music playback state
+music_queues = {}     # guild_id -> deque of queries
+current_track = {}    # guild_id -> currently playing title
 
+# Spotify client setup (requires SPOTIFY_CLIENT_ID & SECRET in env)
+spotify = Spotify(
+    auth_manager=SpotifyClientCredentials(
+        client_id=os.getenv("SPOTIFY_CLIENT_ID"),
+        client_secret=os.getenv("SPOTIFY_CLIENT_SECRET")
+    )
+)
+
+# youtube_dl & ffmpeg options
+ytdl_format_options = {
+    "format": "bestaudio/best",
+    "noplaylist": True,
+    "quiet": True,
+    "default_search": "auto",
+}
+ffmpeg_options = {"options": "-vn"}
+ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
+
+class YTDLSource(discord.PCMVolumeTransformer):
+    def __init__(self, source, *, data, volume=0.5):
+        super().__init__(source, volume)
+        self.title = data.get("title")
+
+    @classmethod
+    async def from_query(cls, query, *, loop=None, stream=True):
+        loop = loop or asyncio.get_event_loop()
+        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(query, download=not stream))
+        if "entries" in data:
+            data = data["entries"][0]
+        return cls(discord.FFmpegPCMAudio(data["url"], **ffmpeg_options), data=data)
+
+# Expanded global question lists
 truth_questions = [
     "Have you ever had a crush on someone in this server?",
     "What's your biggest secret?",
@@ -313,8 +346,7 @@ async def latencycheck(ctx):
     bluedox_ping = random.randint(1, 50)
     embed = discord.Embed(
         title="📊 Latency Report",
-        description="Below are the detailed latency statistics:",
-        color=0x3498DB,
+        description="Below are the detailed latency statistics:",        color=0x3498DB,
         timestamp=now
     )
     embed.add_field(name="Websocket Latency", value=f"**{latency_ms}ms**", inline=True)
@@ -322,7 +354,7 @@ async def latencycheck(ctx):
     embed.add_field(name="Uptime", value=f"**{uptime_str}**", inline=False)
     embed.add_field(name="User Verification", value=f"**{ctx.author.name}** — *Access Granted*", inline=False)
     embed.add_field(name="Bluedox Check", value=f"**{bluedox_ping}ms**", inline=True)
-    embed.add_field(name="Note", value="Websocket latency is measured between the bot and Discord's servers.", inline=False)
+    embed.add_field(name="Note", value="Websocket latency is measured between Discord and the bot.", inline=False)
     embed.set_footer(text="Latency report provided by your mahiru.")
     await ctx.send(embed=embed)
 
@@ -384,12 +416,6 @@ async def unmute(ctx, member: discord.Member):
         await ctx.send(f"🔊 **{member.mention}** has been unmuted.")
     except Exception as e:
         await ctx.send(f"❌ Failed to unmute {member.mention}: {e}")
-
-@bot.command()
-async def coinflip(ctx):
-    """Flips a coin (50/50 chance of Heads or Tails)."""
-    result = random.choice(["Heads", "Tails"])
-    await ctx.send(f"🪙 The coin landed on **{result}**!")
 
 @bot.command()
 async def countmessage(ctx, *, query: str):
@@ -455,127 +481,15 @@ async def help(ctx):
     embed.add_field(name="!coinflip", value="Flip a coin (50/50 chance of Heads or Tails).", inline=False)
     embed.add_field(name="!countmessage [text]", value="Count how many times the specified text appears in the channel.", inline=False)
     embed.add_field(name="!transferpoints", value="Transfer your stream points to official trackers (resets your points).", inline=False)
+    embed.add_field(name="!join", value="Bot joins your voice channel.", inline=False)
+    embed.add_field(name="!leave", value="Bot leaves the voice channel.", inline=False)
+    embed.add_field(name="!play [query|Spotify URL]", value="Play music from YouTube or Spotify.", inline=False)
+    embed.add_field(name="!skip", value="Skip the current track.", inline=False)
+    embed.add_field(name="!pause", value="Pause playback.", inline=False)
+    embed.add_field(name="!resume", value="Resume playback.", inline=False)
+    embed.add_field(name="!current", value="Show the currently playing track.", inline=False)
     embed.set_footer(text="Type the command as shown to interact with the bot. Provided by your mahiru.")
     await ctx.send(embed=embed)
-
-# --- Music Commands inserted right before on_message ---
-
-async def ensure_queue(ctx):
-    if ctx.guild.id not in music_queues:
-        music_queues[ctx.guild.id] = deque()
-        current_track[ctx.guild.id] = None
-
-async def play_next(ctx):
-    q = music_queues[ctx.guild.id]
-    if not q:
-        current_track[ctx.guild.id] = None
-        return
-    query = q.popleft()
-    source = await YTDLSource.from_query(query, loop=bot.loop, stream=True)
-    current_track[ctx.guild.id] = source.title
-    vc = ctx.voice_client
-    vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
-
-@bot.command()
-async def join(ctx):
-    """Join the voice channel you’re in."""
-    if not ctx.author.voice or not ctx.author.voice.channel:
-        return await ctx.send("You need to be in a voice channel first.")
-    channel = ctx.author.voice.channel
-    if ctx.voice_client:
-        await ctx.voice_client.move_to(channel)
-    else:
-        await channel.connect()
-    await ctx.send(f"🔗 Joined **{channel.name}**")
-
-@bot.command()
-async def leave(ctx):
-    """Disconnect the bot from voice."""
-    if ctx.voice_client:
-        await ctx.voice_client.disconnect()
-        await ctx.send("🔌 Disconnected.")
-    else:
-        await ctx.send("I’m not in a voice channel.")
-
-@bot.command()
-async def play(ctx, *, query: str):
-    """
-    Play a track or Spotify playlist:
-    - Spotify track URL enqueues that track
-    - Spotify playlist URL enqueues all tracks
-    - Otherwise treated as YouTube URL/search
-    """
-    await ensure_queue(ctx)
-
-    # Spotify playlist
-    if "open.spotify.com/playlist" in query:
-        pid = query.split("/")[-1].split("?")[0]
-        items = spotify.playlist_items(pid, fields="items.track.name,items.track.artists.name")["items"]
-        if not items:
-            return await ctx.send("No tracks found in that playlist.")
-        await ctx.send(f"🔁 Enqueuing **{len(items)}** tracks from playlist…")
-        for it in items:
-            t = it["track"]
-            music_queues[ctx.guild.id].append(f"{t['name']} {t['artists'][0]['name']}")
-    # Spotify track
-    elif "open.spotify.com/track" in query:
-        tid = query.split("/")[-1].split("?")[0]
-        t = spotify.track(tid)
-        music_queues[ctx.guild.id].append(f"{t['name']} {t['artists'][0]['name']}")
-    else:
-        music_queues[ctx.guild.id].append(query)
-
-    # Connect if needed
-    if not ctx.voice_client:
-        if not ctx.author.voice:
-            return await ctx.send("Join a voice channel first.")
-        await ctx.author.voice.channel.connect()
-
-    vc = ctx.voice_client
-    if not vc.is_playing():
-        await ctx.send("▶️ Starting playback…")
-        await play_next(ctx)
-    else:
-        await ctx.send(f"➕ Added to queue (position {len(music_queues[ctx.guild.id])}).")
-
-@bot.command()
-async def skip(ctx):
-    """Skip current track."""
-    vc = ctx.voice_client
-    if vc and vc.is_playing():
-        vc.stop()
-        await ctx.send("⏭️ Skipped.")
-    else:
-        await ctx.send("Nothing is playing.")
-
-@bot.command()
-async def pause(ctx):
-    """Pause playback."""
-    vc = ctx.voice_client
-    if vc and vc.is_playing():
-        vc.pause()
-        await ctx.send("⏸️ Paused.")
-    else:
-        await ctx.send("Nothing to pause.")
-
-@bot.command()
-async def resume(ctx):
-    """Resume playback."""
-    vc = ctx.voice_client
-    if vc and vc.is_paused():
-        vc.resume()
-        await ctx.send("▶️ Resumed.")
-    else:
-        await ctx.send("Nothing is paused.")
-
-@bot.command(name="current")
-async def current(ctx):
-    """Show currently playing track."""
-    title = current_track.get(ctx.guild.id)
-    if title:
-        await ctx.send(f"🎶 Now playing: **{title}**")
-    else:
-        await ctx.send("Nothing is playing right now.")
 
 # --- Message handling & error logging ---
 
