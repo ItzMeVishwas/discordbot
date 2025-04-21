@@ -4,5 +4,5 @@ requests
 aiohttp
 asyncio
 spotipy
-youtube_dl
+yt-dlp
 PyNaCl
