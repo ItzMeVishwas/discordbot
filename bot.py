@@ -7,8 +7,13 @@ import datetime
 import asyncio
 import requests
 from keep_alive import keep_alive
-from collections import defaultdict
+from collections import defaultdict, deque
 import logging
+
+# New imports for music
+import youtube_dl
+from spotipy import Spotify
+from spotipy.oauth2 import SpotifyClientCredentials
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -26,6 +31,8 @@ bot = commands.Bot(command_prefix="!", help_command=None, intents=intents)
 
 YOUR_USER_ID = 748964469039824937  # Replace with your actual Discord ID
 POINTS_FILE = "stream_points.json"
+
+# --- Stream‐points persistence ---
 
 def load_points():
     if os.path.exists(POINTS_FILE):
@@ -48,7 +55,8 @@ stream_points = defaultdict(int, load_points())
 streaming_users = set()
 session_start_points = {}
 
-# Expanded global question lists
+# --- Question lists ---
+
 truth_questions = [
     "Have you ever had a crush on someone in this server?",
     "What's your biggest secret?",
@@ -147,6 +155,8 @@ would_you_rather_questions = [
     "Would you rather always know when someone is lying or always get away with lying?"
 ]
 
+# --- Events & tasks ---
+
 @bot.event
 async def on_ready():
     logger.info("✅ %s is online and ready!", bot.user)
@@ -190,12 +200,12 @@ async def on_voice_state_update(member, before, after):
         await general_channel.send(f"🎥 **{member.name}** has started streaming! Stream point mode enabled!")
     elif before.self_stream and not after.self_stream:
         if member.id in streaming_users:
-            current_points = stream_points.get(str(member.id), 0)
-            start_points = session_start_points.get(member.id, current_points)
-            session_points = current_points - start_points
+            current = stream_points.get(str(member.id), 0)
+            start = session_start_points.get(member.id, current)
+            earned = current - start
             await general_channel.send(
-                f"🎥 **{member.name}** has stopped streaming and earned **{session_points}** points this session "
-                f"(Lifetime total: **{current_points}** points)!"
+                f"🎥 **{member.name}** has stopped streaming and earned **{earned}** points this session "
+                f"(Lifetime total: **{current}** points)!"
             )
             streaming_users.remove(member.id)
             session_start_points.pop(member.id, None)
@@ -206,6 +216,8 @@ async def add_stream_points():
     for user_id in streaming_users:
         stream_points[str(user_id)] += 1
     save_points(stream_points)
+
+# --- Your original commands exactly as before ---
 
 @bot.command()
 async def balance(ctx):
@@ -446,6 +458,127 @@ async def help(ctx):
     embed.set_footer(text="Type the command as shown to interact with the bot. Provided by your mahiru.")
     await ctx.send(embed=embed)
 
+# --- Music Commands inserted right before on_message ---
+
+async def ensure_queue(ctx):
+    if ctx.guild.id not in music_queues:
+        music_queues[ctx.guild.id] = deque()
+        current_track[ctx.guild.id] = None
+
+async def play_next(ctx):
+    q = music_queues[ctx.guild.id]
+    if not q:
+        current_track[ctx.guild.id] = None
+        return
+    query = q.popleft()
+    source = await YTDLSource.from_query(query, loop=bot.loop, stream=True)
+    current_track[ctx.guild.id] = source.title
+    vc = ctx.voice_client
+    vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
+
+@bot.command()
+async def join(ctx):
+    """Join the voice channel you’re in."""
+    if not ctx.author.voice or not ctx.author.voice.channel:
+        return await ctx.send("You need to be in a voice channel first.")
+    channel = ctx.author.voice.channel
+    if ctx.voice_client:
+        await ctx.voice_client.move_to(channel)
+    else:
+        await channel.connect()
+    await ctx.send(f"🔗 Joined **{channel.name}**")
+
+@bot.command()
+async def leave(ctx):
+    """Disconnect the bot from voice."""
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect()
+        await ctx.send("🔌 Disconnected.")
+    else:
+        await ctx.send("I’m not in a voice channel.")
+
+@bot.command()
+async def play(ctx, *, query: str):
+    """
+    Play a track or Spotify playlist:
+    - Spotify track URL enqueues that track
+    - Spotify playlist URL enqueues all tracks
+    - Otherwise treated as YouTube URL/search
+    """
+    await ensure_queue(ctx)
+
+    # Spotify playlist
+    if "open.spotify.com/playlist" in query:
+        pid = query.split("/")[-1].split("?")[0]
+        items = spotify.playlist_items(pid, fields="items.track.name,items.track.artists.name")["items"]
+        if not items:
+            return await ctx.send("No tracks found in that playlist.")
+        await ctx.send(f"🔁 Enqueuing **{len(items)}** tracks from playlist…")
+        for it in items:
+            t = it["track"]
+            music_queues[ctx.guild.id].append(f"{t['name']} {t['artists'][0]['name']}")
+    # Spotify track
+    elif "open.spotify.com/track" in query:
+        tid = query.split("/")[-1].split("?")[0]
+        t = spotify.track(tid)
+        music_queues[ctx.guild.id].append(f"{t['name']} {t['artists'][0]['name']}")
+    else:
+        music_queues[ctx.guild.id].append(query)
+
+    # Connect if needed
+    if not ctx.voice_client:
+        if not ctx.author.voice:
+            return await ctx.send("Join a voice channel first.")
+        await ctx.author.voice.channel.connect()
+
+    vc = ctx.voice_client
+    if not vc.is_playing():
+        await ctx.send("▶️ Starting playback…")
+        await play_next(ctx)
+    else:
+        await ctx.send(f"➕ Added to queue (position {len(music_queues[ctx.guild.id])}).")
+
+@bot.command()
+async def skip(ctx):
+    """Skip current track."""
+    vc = ctx.voice_client
+    if vc and vc.is_playing():
+        vc.stop()
+        await ctx.send("⏭️ Skipped.")
+    else:
+        await ctx.send("Nothing is playing.")
+
+@bot.command()
+async def pause(ctx):
+    """Pause playback."""
+    vc = ctx.voice_client
+    if vc and vc.is_playing():
+        vc.pause()
+        await ctx.send("⏸️ Paused.")
+    else:
+        await ctx.send("Nothing to pause.")
+
+@bot.command()
+async def resume(ctx):
+    """Resume playback."""
+    vc = ctx.voice_client
+    if vc and vc.is_paused():
+        vc.resume()
+        await ctx.send("▶️ Resumed.")
+    else:
+        await ctx.send("Nothing is paused.")
+
+@bot.command(name="current")
+async def current(ctx):
+    """Show currently playing track."""
+    title = current_track.get(ctx.guild.id)
+    if title:
+        await ctx.send(f"🎶 Now playing: **{title}**")
+    else:
+        await ctx.send("Nothing is playing right now.")
+
+# --- Message handling & error logging ---
+
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
@@ -458,7 +591,7 @@ async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
         return
     logger.error("Error in command '%s': %s", ctx.command, error)
-    await ctx.send(f"⚠️ An error occurred: {str(error)}")
+    await ctx.send(f"⚠️ An error occurred: {error}")
 
 keep_alive()
 bot.run(os.getenv("TOKEN"))
