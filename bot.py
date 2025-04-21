@@ -1,23 +1,26 @@
 # bot.py
 
-import discord
-from discord.ext import commands, tasks
 import os
 import json
 import random
 import datetime
 import asyncio
-import requests
-from keep_alive import keep_alive
-from collections import defaultdict, deque
 import logging
+import requests
 
-# Use yt_dlp instead of youtube_dl to avoid bot‑check errors
+import discord
+from discord.ext import commands, tasks
+from collections import defaultdict, deque
+
+from keep_alive import keep_alive
+
+# use yt-dlp for more reliable YouTube handling
 import yt_dlp as youtube_dl
 from spotipy import Spotify
 from spotipy.oauth2 import SpotifyClientCredentials
 
-# --- Logging & Intents ---
+# ─── Logging & Intents ─────────────────────────────────────────────────────────
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('discord_bot')
 
@@ -29,10 +32,11 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", help_command=None, intents=intents)
 
-YOUR_USER_ID = 748964469039824937   # ← your Discord user ID
+YOUR_USER_ID = 748964469039824937
 POINTS_FILE = "stream_points.json"
 
-# --- Stream‑Points Persistence ---
+# ─── Stream‑Points Persistence ────────────────────────────────────────────────
+
 def load_points():
     if os.path.exists(POINTS_FILE):
         try:
@@ -53,20 +57,19 @@ stream_points = defaultdict(int, load_points())
 streaming_users = set()
 session_start_points = {}
 
-# --- Music State & Clients ---
-music_queues = {}    # guild_id → deque of queries
-current_track = {}   # guild_id → title of currently playing track
+# ─── Music State & Clients ───────────────────────────────────────────────────
 
-# Spotify (Client Credentials flow)
-spotify = Spotify(
-    auth_manager=SpotifyClientCredentials(
-        client_id=os.getenv("SPOTIFY_CLIENT_ID"),
-        client_secret=os.getenv("SPOTIFY_CLIENT_SECRET")
-    )
-)
+music_queues = {}     # guild_id → deque of query strings
+current_track = {}    # guild_id → title of currently playing track
 
-# yt-dlp options to mimic a real browser and bind IPv4
-ytdl_format_options = {
+# Spotify Client Credentials (requires env vars SPOTIFY_CLIENT_ID & SPOTIFY_CLIENT_SECRET)
+spotify = Spotify(auth_manager=SpotifyClientCredentials(
+    client_id=os.getenv("SPOTIFY_CLIENT_ID"),
+    client_secret=os.getenv("SPOTIFY_CLIENT_SECRET")
+))
+
+# yt-dlp + FFmpeg options
+ytdl_opts = {
     "format": "bestaudio/best",
     "noplaylist": True,
     "quiet": True,
@@ -75,8 +78,8 @@ ytdl_format_options = {
     "nocheckcertificate": True,
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
-ffmpeg_options = {"options": "-vn"}
-ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
+ffmpeg_opts = {"options": "-vn"}
+ytdl = youtube_dl.YoutubeDL(ytdl_opts)
 
 class YTDLSource(discord.PCMVolumeTransformer):
     def __init__(self, source, *, data, volume=0.5):
@@ -87,16 +90,18 @@ class YTDLSource(discord.PCMVolumeTransformer):
     async def from_query(cls, query, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
         data = await loop.run_in_executor(
-            None, lambda: ytdl.extract_info(query, download=not stream)
+            None,
+            lambda: ytdl.extract_info(query, download=not stream)
         )
         if "entries" in data:
             data = data["entries"][0]
         return cls(
-            discord.FFmpegPCMAudio(data["url"], **ffmpeg_options),
+            discord.FFmpegPCMAudio(data["url"], **ffmpeg_opts),
             data=data
         )
 
-# --- Truth / Dare / Would You Rather Lists ---
+# ─── Truth / Dare / Would You Rather Lists ────────────────────────────────────
+
 truth_questions = [
     "Have you ever had a crush on someone in this server?",
     "What's your biggest secret?",
@@ -172,7 +177,7 @@ would_you_rather_questions = [
     "Would you rather date your best friend or a total stranger?",
     "Would you rather marry for love or money?",
     "Would you rather never be able to kiss again or never hug again?",
-    "Would you rather have your dream job or your dream partner?",
+    "Would you rather have your dream job or your dream partner?",  
     "Would you rather be single forever or always be in a relationship?",
     "Would you rather live in the city or the countryside?",
     "Would you rather be the funniest person in the room or the smartest?",
@@ -195,24 +200,22 @@ would_you_rather_questions = [
     "Would you rather always know when someone is lying or always get away with lying?"
 ]
 
-# --- Events & Tasks ---
+# ─── Events & Background Tasks ─────────────────────────────────────────────────
 
 @bot.event
 async def on_ready():
-    logger.info("✅ %s is online and ready!", bot.user)
+    logger.info("✅ %s is online!", bot.user)
     try:
         usr = await bot.fetch_user(YOUR_USER_ID)
         await usr.send("✅ Bot is online and monitoring statuses & streams.")
-    except Exception as e:
-        logger.error("Startup DM failed: %s", e)
+    except Exception:
+        pass
     bot.launch_time = datetime.datetime.utcnow()
     for g in bot.guilds:
         ch = discord.utils.get(g.text_channels, name="general")
         if ch:
-            try:
-                await ch.send("✨ **New code module updated.**")
-            except:
-                pass
+            try: await ch.send("✨ **New code module updated.**")
+            except: pass
     add_stream_points.start()
     await bot.change_presence(activity=discord.Game(name="Hehe haha ing"))
 
@@ -222,8 +225,7 @@ async def on_presence_update(before, after):
         try:
             usr = await bot.fetch_user(YOUR_USER_ID)
             await usr.send(f"⚡ **{after.name}** status: {before.status} → {after.status}")
-        except:
-            pass
+        except: pass
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -248,13 +250,32 @@ async def add_stream_points():
         stream_points[str(uid)] += 1
     save_points(stream_points)
 
-# --- Commands (balance, truth, dare, etc.) ---
+# ─── Commands (balance, truth, dare, etc.) ─────────────────────────────────────
 
+# Stream‑Points
 @bot.command()
 async def balance(ctx):
     pts = stream_points.get(str(ctx.author.id), 0)
     await ctx.send(f"💰 **{ctx.author.name}**, you have **{pts}** stream points.")
 
+@bot.command()
+async def leaderboard(ctx):
+    top = sorted(stream_points.items(), key=lambda i: i[1], reverse=True)[:5]
+    out = "🏆 **Leaderboard** 🏆\n"
+    for i, (uid, pts) in enumerate(top, 1):
+        usr = await bot.fetch_user(int(uid))
+        out += f"**{i}. {usr.name}** — {pts} pts\n"
+    await ctx.send(out)
+
+@bot.command()
+async def transferpoints(ctx):
+    await ctx.send("🔄 Transferring points…")
+    await asyncio.sleep(2)
+    stream_points[str(ctx.author.id)] = 0
+    save_points(stream_points)
+    await ctx.send("✅ Points reset to 0.")
+
+# Fun & Engagement
 @bot.command()
 async def truth(ctx):
     await ctx.send(f"🧐 **Truth:** {random.choice(truth_questions)}")
@@ -268,42 +289,52 @@ async def would_you_rather(ctx):
     await ctx.send(f"🤔 **Would You Rather:** {random.choice(would_you_rather_questions)}")
 
 @bot.command()
+async def coinflip(ctx):
+    await ctx.send(f"🪙 {random.choice(['Heads','Tails'])}!")  
+
+@bot.command()
+async def countmessage(ctx, *, query: str):
+    msg = await ctx.send(f"🔎 Counting `{query}`…")
+    cnt = 0
+    async for m in ctx.channel.history(limit=None):
+        if query.lower() in m.content.lower():
+            cnt += 1
+    comment = (
+        "Wow!" if cnt<=10 else
+        "Amazing!" if cnt<=100 else
+        "Crazy!" if cnt<=150 else
+        "Damn!" if cnt<=200 else
+        "Legendary!"
+    )
+    await msg.edit(content=f"🔎 Found **{cnt}** occurrences of `{query}`. {comment}")
+
+# Moderation & Utility
+@bot.command()
 @commands.has_permissions(manage_messages=True)
 async def purge(ctx, amount: int):
     if amount < 1:
         return await ctx.send("Specify a number > 0.")
-    msgs = []
-    async for m in ctx.channel.history(limit=amount, before=ctx.message):
-        msgs.append(m)
+    msgs = [m async for m in ctx.channel.history(limit=amount, before=ctx.message)]
     if not msgs:
         return await ctx.send("No messages found.")
     try:
         await ctx.channel.delete_messages(msgs)
         await ctx.send(f"🧹 Purged {len(msgs)} msgs.", delete_after=5)
     except discord.Forbidden:
-        await ctx.send("I lack delete permissions.")
-    except discord.HTTPException as e:
+        await ctx.send("I lack delete perms.")
+    except Exception as e:
         await ctx.send(f"Delete failed: {e}")
 
 @bot.command()
 async def ping(ctx):
-    await ctx.send(f"🏓 Pong! Latency: {round(bot.latency*1000)}ms")
-
-@bot.command()
-async def leaderboard(ctx):
-    top = sorted(stream_points.items(), key=lambda i: i[1], reverse=True)[:5]
-    out = "🏆 **Leaderboard** 🏆\n"
-    for i, (uid, pts) in enumerate(top, 1):
-        usr = await bot.fetch_user(int(uid))
-        out += f"**{i}. {usr.name}** — {pts} pts\n"
-    await ctx.send(out)
+    await ctx.send(f"🏓 Pong! {round(bot.latency*1000)}ms")
 
 @bot.command()
 async def serverinfo(ctx):
     g = ctx.guild
     await ctx.send(
-        f"**Server Name:** {g.name}\n"
-        f"**Server ID:** {g.id}\n"
+        f"**Name:** {g.name}\n"
+        f"**ID:** {g.id}\n"
         f"**Members:** {g.member_count}\n"
         f"**Created:** {g.created_at:%Y-%m-%d}\n"
         f"**Owner:** {g.owner}"
@@ -329,7 +360,7 @@ async def ban(ctx, member: discord.Member, *, reason=None):
         await member.ban(reason=reason)
         await ctx.send(f"🚫 {member.mention} banned.")
     except Exception as e:
-        await ctx.send(f"❌ Ban failed: {e}")
+        await ctx.send(f"Ban failed: {e}")
 
 @bot.command()
 @commands.has_permissions(kick_members=True)
@@ -338,16 +369,16 @@ async def kick(ctx, member: discord.Member, *, reason=None):
         await member.kick(reason=reason)
         await ctx.send(f"👢 {member.mention} kicked.")
     except Exception as e:
-        await ctx.send(f"❌ Kick failed: {e}")
+        await ctx.send(f"Kick failed: {e}")
 
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 async def mute(ctx, member: discord.Member, *, reason=None):
     role = discord.utils.get(ctx.guild.roles, name="Muted")
     if not role:
-        role = await ctx.guild.create_role(name="Muted", reason="Auto-created for mute")
-        for ch in ctx.guild.channels:
-            await ch.set_permissions(role, send_messages=False, speak=False, add_reactions=False)
+        role = await ctx.guild.create_role(name="Muted", reason="Mute role")
+        for c in ctx.guild.channels:
+            await c.set_permissions(role, send_messages=False, speak=False, add_reactions=False)
     if role in member.roles:
         return await ctx.send(f"{member.mention} already muted.")
     await member.add_roles(role, reason=reason)
@@ -363,61 +394,8 @@ async def unmute(ctx, member: discord.Member):
     else:
         await ctx.send(f"{member.mention} is not muted.")
 
-@bot.command()
-async def coinflip(ctx):
-    await ctx.send(f"🪙 {random.choice(['Heads','Tails'])}!")
+# ─── Music Helpers & Commands ─────────────────────────────────────────────────
 
-@bot.command()
-async def countmessage(ctx, *, query: str):
-    tmp = await ctx.send(f"🔎 Counting `{query}`…")
-    cnt = 0
-    async for m in ctx.channel.history(limit=None):
-        if query.lower() in m.content.lower():
-            cnt += 1
-    comment = ("Wow!" if cnt<=10 else "Amazing!" if cnt<=100 else "Crazy!" if cnt<=150 else "Damn!" if cnt<=200 else "Legendary!")
-    await tmp.edit(content=f"🔎 Found **{cnt}** `{query}`. {comment}")
-
-@bot.command()
-async def transferpoints(ctx):
-    await ctx.send("🔄 Transferring points…")
-    await asyncio.sleep(2)
-    stream_points[str(ctx.author.id)] = 0
-    save_points(stream_points)
-    await ctx.send("✅ Points reset to 0.")
-
-@bot.command()
-async def help(ctx):
-    em = discord.Embed(title="Commands", color=0x3498DB)
-    listing = [
-        ("!balance", "Your stream points"),
-        ("!leaderboard", "Top 5 by points"),
-        ("!transferpoints", "Reset your points"),
-        ("!truth", "Random truth"),
-        ("!dare", "Random dare"),
-        ("!wouldyourather","Random WYR"),
-        ("!coinflip","Flip a coin"),
-        ("!countmessage <text>","Count text occurrences"),
-        ("!purge <n>","Delete n messages"),
-        ("!ping","Latency"),
-        ("!serverinfo","Server info"),
-        ("!latencycheck","Detailed latency"),
-        ("!ban @","Ban user"),
-        ("!kick @","Kick user"),
-        ("!mute @","Mute user"),
-        ("!unmute @","Unmute user"),
-        ("!join","Join VC"),
-        ("!leave","Leave VC"),
-        ("!play <query|Spotify URL>","Play music"),
-        ("!skip","Skip track"),
-        ("!pause","Pause music"),
-        ("!resume","Resume music"),
-        ("!current","Now playing"),
-    ]
-    for n,d in listing:
-        em.add_field(name=n,value=d,inline=False)
-    await ctx.send(embed=em)
-
-# --- Music helpers & commands ---
 async def ensure_queue(ctx):
     if ctx.guild.id not in music_queues:
         music_queues[ctx.guild.id] = deque()
@@ -432,7 +410,15 @@ async def play_next(ctx):
     src = await YTDLSource.from_query(qry, loop=bot.loop, stream=True)
     current_track[ctx.guild.id] = src.title
     vc = ctx.voice_client
-    vc.play(src, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
+
+    def _after(err):
+        if err:
+            logger.error("Playback error: %s", err)
+        fut = asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop)
+        try: fut.result()
+        except Exception as e: logger.error("Next track error: %s", e)
+
+    vc.play(src, after=_after)
 
 @bot.command()
 async def join(ctx):
@@ -473,7 +459,8 @@ async def play(ctx, *, query: str):
         music_queues[ctx.guild.id].append(query)
 
     if not ctx.voice_client:
-        if not ctx.author.voice: return await ctx.send("Join voice channel first.")
+        if not ctx.author.voice:
+            return await ctx.send("Join voice channel first.")
         await ctx.author.voice.channel.connect()
 
     vc = ctx.voice_client
@@ -519,6 +506,23 @@ async def current(ctx):
     else:
         await ctx.send("Nothing is playing.")
 
-# --- Run keep-alive and bot ---
+# ─── Message Handling & Error Logging ────────────────────────────────────────
+
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return
+    logger.debug("📩 %s", message.content)
+    await bot.process_commands(message)
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        return
+    logger.error("Error in '%s': %s", ctx.command, error)
+    await ctx.send(f"⚠️ An error occurred: {error}")
+
+# ─── Launch ───────────────────────────────────────────────────────────────────
+
 keep_alive()
 bot.run(os.getenv("TOKEN"))
