@@ -10,7 +10,7 @@ from keep_alive import keep_alive
 from collections import defaultdict, deque
 import logging
 
-# New imports for music
+# Music dependencies
 import youtube_dl
 from spotipy import Spotify
 from spotipy.oauth2 import SpotifyClientCredentials
@@ -21,18 +21,19 @@ logger = logging.getLogger('discord_bot')
 
 # Enable necessary intents
 intents = discord.Intents.default()
-intents.message_content = True  # Allows the bot to read messages
+intents.message_content = True
 intents.presences = True
 intents.members = True
 intents.voice_states = True
 
-# Initialize bot with command prefix and disable default help command
+# Initialize bot
 bot = commands.Bot(command_prefix="!", help_command=None, intents=intents)
 
-YOUR_USER_ID = 748964469039824937  # Replace with your actual Discord ID
+YOUR_USER_ID = 748964469039824937  # Replace with your Discord ID
 POINTS_FILE = "stream_points.json"
 
-# Persistent stream-points storage
+# --- Stream‑points persistence ---
+
 def load_points():
     if os.path.exists(POINTS_FILE):
         try:
@@ -54,11 +55,12 @@ stream_points = defaultdict(int, load_points())
 streaming_users = set()
 session_start_points = {}
 
-# Music playback state
-music_queues = {}     # guild_id -> deque of queries
-current_track = {}    # guild_id -> currently playing title
+# --- Music playback state ---
 
-# Spotify client setup (requires SPOTIFY_CLIENT_ID & SECRET in env)
+music_queues = {}    # guild_id -> deque of queries
+current_track = {}   # guild_id -> title of currently playing track
+
+# Spotify client (requires SPOTIFY_CLIENT_ID & SPOTIFY_CLIENT_SECRET in env)
 spotify = Spotify(
     auth_manager=SpotifyClientCredentials(
         client_id=os.getenv("SPOTIFY_CLIENT_ID"),
@@ -89,7 +91,8 @@ class YTDLSource(discord.PCMVolumeTransformer):
             data = data["entries"][0]
         return cls(discord.FFmpegPCMAudio(data["url"], **ffmpeg_options), data=data)
 
-# Expanded global question lists
+# --- Question lists ---
+
 truth_questions = [
     "Have you ever had a crush on someone in this server?",
     "What's your biggest secret?",
@@ -188,7 +191,7 @@ would_you_rather_questions = [
     "Would you rather always know when someone is lying or always get away with lying?"
 ]
 
-# --- Events & tasks ---
+# --- Events & background tasks ---
 
 @bot.event
 async def on_ready():
@@ -200,14 +203,14 @@ async def on_ready():
         logger.error("Error sending startup DM: %s", e)
     bot.launch_time = datetime.datetime.utcnow()
     for guild in bot.guilds:
-        general_channel = discord.utils.get(guild.text_channels, name="general")
-        if general_channel:
+        channel = discord.utils.get(guild.text_channels, name="general")
+        if channel:
             try:
-                await general_channel.send("✨ **New code module updated.**")
+                await channel.send("✨ **New code module updated.**")
             except Exception as e:
                 logger.error("Could not send update message in %s: %s", guild.name, e)
         else:
-            logger.warning("No 'general' channel found in guild: %s", guild.name)
+            logger.warning("No 'general' channel in %s", guild.name)
     add_stream_points.start()
     await bot.change_presence(activity=discord.Game(name="Hehe haha ing"))
 
@@ -218,76 +221,65 @@ async def on_presence_update(before, after):
             user = await bot.fetch_user(YOUR_USER_ID)
             await user.send(f"⚡ **{after.name}** changed status: **{before.status}** → **{after.status}**")
         except Exception as e:
-            logger.error("Error sending presence update DM: %s", e)
+            logger.error("Error sending presence DM: %s", e)
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    guild = member.guild
-    general_channel = discord.utils.get(guild.text_channels, name="general")
-    if general_channel is None:
-        logger.warning("General channel not found in guild '%s'. Skipping stream notification.", guild.name)
+    channel = discord.utils.get(member.guild.text_channels, name="general")
+    if not channel:
         return
     if not before.self_stream and after.self_stream:
         streaming_users.add(member.id)
         session_start_points[member.id] = stream_points.get(str(member.id), 0)
-        await general_channel.send(f"🎥 **{member.name}** has started streaming! Stream point mode enabled!")
-    elif before.self_stream and not after.self_stream:
-        if member.id in streaming_users:
-            current = stream_points.get(str(member.id), 0)
-            start = session_start_points.get(member.id, current)
-            earned = current - start
-            await general_channel.send(
-                f"🎥 **{member.name}** has stopped streaming and earned **{earned}** points this session "
-                f"(Lifetime total: **{current}** points)!"
-            )
-            streaming_users.remove(member.id)
-            session_start_points.pop(member.id, None)
-            save_points(stream_points)
+        await channel.send(f"🎥 **{member.name}** has started streaming! Stream point mode enabled!")
+    elif before.self_stream and not after.self_stream and member.id in streaming_users:
+        current = stream_points.get(str(member.id), 0)
+        start = session_start_points.get(member.id, current)
+        earned = current - start
+        await channel.send(f"🎥 **{member.name}** stopped streaming, earned **{earned}** points (Total: **{current}**).")
+        streaming_users.remove(member.id)
+        session_start_points.pop(member.id, None)
+        save_points(stream_points)
 
 @tasks.loop(seconds=60)
 async def add_stream_points():
-    for user_id in streaming_users:
-        stream_points[str(user_id)] += 1
+    for uid in streaming_users:
+        stream_points[str(uid)] += 1
     save_points(stream_points)
 
-# --- Your original commands exactly as before ---
+# --- Original commands ---
 
 @bot.command()
 async def balance(ctx):
-    points = int(stream_points.get(str(ctx.author.id), 0))
+    points = stream_points.get(str(ctx.author.id), 0)
     await ctx.send(f"💰 **{ctx.author.name}**, you have **{points}** stream points.")
 
 @bot.command()
 async def truth(ctx):
-    """Provides a random truth question."""
     await ctx.send(f"🧐 **Truth:** {random.choice(truth_questions)}")
 
 @bot.command()
 async def dare(ctx):
-    """Provides a random dare question."""
     await ctx.send(f"🔥 **Dare:** {random.choice(dare_questions)}")
 
 @bot.command(name="wouldyourather")
 async def would_you_rather(ctx):
-    """Provides a random 'Would You Rather' question."""
     await ctx.send(f"🤔 **Would You Rather:** {random.choice(would_you_rather_questions)}")
 
 @bot.command()
 @commands.has_permissions(manage_messages=True)
 async def purge(ctx, amount: int):
-    """Deletes a specified number of messages above the command message."""
     if amount < 1:
-        await ctx.send("Please specify a number greater than 0.")
-        return
-    messages_to_delete = []
-    async for message in ctx.channel.history(limit=amount, before=ctx.message):
-        messages_to_delete.append(message)
-    if messages_to_delete:
+        return await ctx.send("Please specify a number greater than 0.")
+    msgs = []
+    async for m in ctx.channel.history(limit=amount, before=ctx.message):
+        msgs.append(m)
+    if msgs:
         try:
-            await ctx.channel.delete_messages(messages_to_delete)
-            await ctx.send(f"🧹 **Purged {len(messages_to_delete)} messages.**", delete_after=5)
+            await ctx.channel.delete_messages(msgs)
+            await ctx.send(f"🧹 Purged {len(msgs)} messages.", delete_after=5)
         except discord.Forbidden:
-            await ctx.send("I do not have permission to delete messages.")
+            await ctx.send("I lack permissions to delete messages.")
         except discord.HTTPException as e:
             await ctx.send(f"Failed to delete messages: {e}")
     else:
@@ -295,201 +287,249 @@ async def purge(ctx, amount: int):
 
 @bot.command()
 async def ping(ctx):
-    """Shows the bot's latency."""
-    latency = round(bot.latency * 1000)
-    await ctx.send(f"🏓 **Pong! Latency:** {latency}ms")
+    await ctx.send(f"🏓 Pong! Latency: {round(bot.latency*1000)}ms")
 
 @bot.command()
 async def leaderboard(ctx):
-    """Displays the top 5 users based on stream points."""
-    sorted_points = sorted(stream_points.items(), key=lambda item: item[1], reverse=True)
-    leaderboard_entries = sorted_points[:5]
-    message = "🏆 **Leaderboard** 🏆\n"
-    rank = 1
-    for user_id, points in leaderboard_entries:
-        try:
-            user = await bot.fetch_user(int(user_id))
-            message += f"**{rank}. {user.name}** — {points} points\n"
-        except Exception as e:
-            message += f"**{rank}. Unknown user** — {points} points\n"
-        rank += 1
-    await ctx.send(message)
+    top = sorted(stream_points.items(), key=lambda i: i[1], reverse=True)[:5]
+    msg = "🏆 **Leaderboard** 🏆\n"
+    for idx, (uid, pts) in enumerate(top, 1):
+        user = await bot.fetch_user(int(uid))
+        msg += f"**{idx}. {user.name}** — {pts} points\n"
+    await ctx.send(msg)
 
 @bot.command()
 async def serverinfo(ctx):
-    """Displays basic server information."""
-    guild = ctx.guild
-    message = (
-        f"**Server Name:** {guild.name}\n"
-        f"**Server ID:** {guild.id}\n"
-        f"**Member Count:** {guild.member_count}\n"
-        f"**Created At:** {guild.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"**Owner:** {guild.owner}"
+    g = ctx.guild
+    await ctx.send(
+        f"**Server Name:** {g.name}\n"
+        f"**Server ID:** {g.id}\n"
+        f"**Member Count:** {g.member_count}\n"
+        f"**Created At:** {g.created_at:%Y-%m-%d %H:%M:%S}\n"
+        f"**Owner:** {g.owner}"
     )
-    await ctx.send(message)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def latencycheck(ctx):
-    """
-    Provides a detailed latency report.
-    *This command is restricted to the 'latency' channel and admin users only.*
-    """
     if ctx.channel.name != "latency":
-        await ctx.send("❌ This command can only be used in the **#latency** channel.")
-        return
+        return await ctx.send("Use this in #latency channel.")
     now = datetime.datetime.utcnow()
-    latency_ms = round(bot.latency * 1000)
-    guild_count = len(bot.guilds)
-    uptime_delta = now - bot.launch_time
-    uptime_str = str(uptime_delta).split('.')[0]
-    bluedox_ping = random.randint(1, 50)
+    uptime = now - bot.launch_time
     embed = discord.Embed(
         title="📊 Latency Report",
-        description="Below are the detailed latency statistics:",        color=0x3498DB,
+        description="Details below:",
+        color=0x3498DB,
         timestamp=now
     )
-    embed.add_field(name="Websocket Latency", value=f"**{latency_ms}ms**", inline=True)
-    embed.add_field(name="Server Count", value=f"**{guild_count} servers**", inline=True)
-    embed.add_field(name="Uptime", value=f"**{uptime_str}**", inline=False)
-    embed.add_field(name="User Verification", value=f"**{ctx.author.name}** — *Access Granted*", inline=False)
-    embed.add_field(name="Bluedox Check", value=f"**{bluedox_ping}ms**", inline=True)
-    embed.add_field(name="Note", value="Websocket latency is measured between Discord and the bot.", inline=False)
-    embed.set_footer(text="Latency report provided by your mahiru.")
+    embed.add_field(name="Websocket Latency", value=f"{round(bot.latency*1000)}ms", inline=True)
+    embed.add_field(name="Server Count", value=f"{len(bot.guilds)}", inline=True)
+    embed.add_field(name="Uptime", value=str(uptime).split('.')[0], inline=False)
+    embed.set_footer(text="Provided by your mahiru.")
     await ctx.send(embed=embed)
 
 @bot.command()
 @commands.has_permissions(ban_members=True)
 async def ban(ctx, member: discord.Member, *, reason=None):
-    """Bans a member from the server."""
     try:
         await member.ban(reason=reason)
-        await ctx.send(f"🚫 **{member.mention}** has been banned. Reason: {reason if reason else 'No reason provided.'}")
+        await ctx.send(f"🚫 {member.mention} has been banned.")
     except Exception as e:
-        await ctx.send(f"❌ Failed to ban {member.mention}: {e}")
+        await ctx.send(f"❌ Failed to ban: {e}")
 
 @bot.command()
 @commands.has_permissions(kick_members=True)
 async def kick(ctx, member: discord.Member, *, reason=None):
-    """Kicks a member from the server."""
     try:
         await member.kick(reason=reason)
-        await ctx.send(f"👢 **{member.mention}** has been kicked. Reason: {reason if reason else 'No reason provided.'}")
+        await ctx.send(f"👢 {member.mention} has been kicked.")
     except Exception as e:
-        await ctx.send(f"❌ Failed to kick {member.mention}: {e}")
+        await ctx.send(f"❌ Failed to kick: {e}")
 
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 async def mute(ctx, member: discord.Member, *, reason=None):
-    """Mutes a member by assigning them the 'Muted' role."""
-    muted_role = discord.utils.get(ctx.guild.roles, name="Muted")
-    if not muted_role:
-        try:
-            muted_role = await ctx.guild.create_role(name="Muted", reason="For muting members")
-            for channel in ctx.guild.channels:
-                await channel.set_permissions(muted_role, send_messages=False, speak=False, add_reactions=False)
-        except Exception as e:
-            await ctx.send(f"❌ Failed to create Muted role: {e}")
-            return
-    if muted_role in member.roles:
-        await ctx.send(f"ℹ️ **{member.mention}** is already muted.")
-        return
-    try:
-        await member.add_roles(muted_role, reason=reason)
-        await ctx.send(f"🔇 **{member.mention}** has been muted. Reason: {reason if reason else 'No reason provided.'}")
-    except Exception as e:
-        await ctx.send(f"❌ Failed to mute {member.mention}: {e}")
+    role = discord.utils.get(ctx.guild.roles, name="Muted")
+    if not role:
+        role = await ctx.guild.create_role(name="Muted", reason="Mute role")
+        for ch in ctx.guild.channels:
+            await ch.set_permissions(role, send_messages=False, speak=False, add_reactions=False)
+    if role in member.roles:
+        return await ctx.send(f"{member.mention} is already muted.")
+    await member.add_roles(role, reason=reason)
+    await ctx.send(f"🔇 {member.mention} has been muted.")
 
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 async def unmute(ctx, member: discord.Member):
-    """Unmutes a member by removing the 'Muted' role."""
-    muted_role = discord.utils.get(ctx.guild.roles, name="Muted")
-    if not muted_role:
-        await ctx.send("ℹ️ There is no Muted role in this server.")
-        return
-    if muted_role not in member.roles:
-        await ctx.send(f"ℹ️ **{member.mention}** is not muted.")
-        return
-    try:
-        await member.remove_roles(muted_role)
-        await ctx.send(f"🔊 **{member.mention}** has been unmuted.")
-    except Exception as e:
-        await ctx.send(f"❌ Failed to unmute {member.mention}: {e}")
+    role = discord.utils.get(ctx.guild.roles, name="Muted")
+    if role and role in member.roles:
+        await member.remove_roles(role)
+        await ctx.send(f"🔊 {member.mention} has been unmuted.")
+    else:
+        await ctx.send(f"{member.mention} is not muted.")
+
+@bot.command()
+async def coinflip(ctx):
+    await ctx.send(f"🪙 The coin landed on **{random.choice(['Heads','Tails'])}**!")
 
 @bot.command()
 async def countmessage(ctx, *, query: str):
-    """
-    Counts how many times the given text appears in the channel.
-    It sends a 'counting' message and then edits it with the final result.
-    """
-    initial_message = await ctx.send(f"🔎 Counting occurrences of **'{query}'** in this channel...")
-    count = 0
-    try:
-        async for message in ctx.channel.history(limit=None):
-            if query.lower() in message.content.lower():
-                count += 1
-    except Exception as e:
-        logger.error("Error counting messages: %s", e)
-        await initial_message.edit(content=f"❌ An error occurred while counting messages: {e}")
-        return
-    if count <= 10:
-        comment = "Wow!"
-    elif count <= 100:
-        comment = "Amazing!"
-    elif count <= 150:
-        comment = "Crazy!"
-    elif count <= 200:
-        comment = "Damn!"
-    else:
-        comment = "Legendary!"
-    await initial_message.edit(content=f"🔎 The text **'{query}'** was repeated **{count}** times in this channel. {comment}")
+    msg = await ctx.send(f"🔎 Counting `' {query} '`…")
+    cnt = 0
+    async for m in ctx.channel.history(limit=None):
+        if query.lower() in m.content.lower():
+            cnt += 1
+    comment = ("Wow!" if cnt<=10 else
+               "Amazing!" if cnt<=100 else
+               "Crazy!" if cnt<=150 else
+               "Damn!" if cnt<=200 else
+               "Legendary!")
+    await msg.edit(content=f"🔎 Found **{cnt}** occurrences of `{query}`. {comment}")
 
 @bot.command()
 async def transferpoints(ctx):
-    """
-    Transfers your stream points to official trackers.
-    After the transfer, your points are reset to 0.
-    """
-    await ctx.send("🔄 Transferring points to official trackers...")
+    await ctx.send("🔄 Transferring points…")
     await asyncio.sleep(2)
     stream_points[str(ctx.author.id)] = 0
     save_points(stream_points)
-    await ctx.send("✅ Transfer complete. Your points have been reset to 0.")
+    await ctx.send("✅ Your points have been reset to 0.")
 
 @bot.command()
 async def help(ctx):
-    """Provides a list of all available commands with descriptions."""
-    embed = discord.Embed(
-        title="Available Commands",
-        description="Below is a list of commands you can use. Please refer to the descriptions for details.",
-        color=0x3498DB
-    )
-    embed.add_field(name="!balance", value="Check your stream points.", inline=False)
-    embed.add_field(name="!truth", value="Receive a random truth question.", inline=False)
-    embed.add_field(name="!dare", value="Receive a random dare question.", inline=False)
-    embed.add_field(name="!wouldyourather", value="Receive a random 'Would You Rather' question.", inline=False)
-    embed.add_field(name="!purge [amount]", value="Delete a specified number of messages above the command.", inline=False)
-    embed.add_field(name="!ping", value="Display the bot's latency.", inline=False)
-    embed.add_field(name="!leaderboard", value="Show the top 5 users based on stream points.", inline=False)
-    embed.add_field(name="!serverinfo", value="Display basic server information.", inline=False)
-    embed.add_field(name="!latencycheck", value="Show detailed latency info (Admin only; use in 'latency' channel).", inline=False)
-    embed.add_field(name="!ban @member [reason]", value="Ban a member from the server.", inline=False)
-    embed.add_field(name="!kick @member [reason]", value="Kick a member from the server.", inline=False)
-    embed.add_field(name="!mute @member [reason]", value="Mute a member by assigning them the 'Muted' role.", inline=False)
-    embed.add_field(name="!unmute @member", value="Unmute a member by removing the 'Muted' role.", inline=False)
-    embed.add_field(name="!coinflip", value="Flip a coin (50/50 chance of Heads or Tails).", inline=False)
-    embed.add_field(name="!countmessage [text]", value="Count how many times the specified text appears in the channel.", inline=False)
-    embed.add_field(name="!transferpoints", value="Transfer your stream points to official trackers (resets your points).", inline=False)
-    embed.add_field(name="!join", value="Bot joins your voice channel.", inline=False)
-    embed.add_field(name="!leave", value="Bot leaves the voice channel.", inline=False)
-    embed.add_field(name="!play [query|Spotify URL]", value="Play music from YouTube or Spotify.", inline=False)
-    embed.add_field(name="!skip", value="Skip the current track.", inline=False)
-    embed.add_field(name="!pause", value="Pause playback.", inline=False)
-    embed.add_field(name="!resume", value="Resume playback.", inline=False)
-    embed.add_field(name="!current", value="Show the currently playing track.", inline=False)
-    embed.set_footer(text="Type the command as shown to interact with the bot. Provided by your mahiru.")
+    embed = discord.Embed(title="Available Commands", color=0x3498DB)
+    cmds = [
+        ("!balance", "Check your stream points."),
+        ("!leaderboard", "Top 5 users by points."),
+        ("!transferpoints", "Submit (reset) your points."),
+        ("!truth", "Random truth question."),
+        ("!dare", "Random dare prompt."),
+        ("!wouldyourather", "Random Would You Rather question."),
+        ("!coinflip", "Flip a coin."),
+        ("!countmessage <text>", "Count occurrences in channel."),
+        ("!purge <n>", "Delete n messages (Manage Messages)."),
+        ("!ping", "Bot latency."),
+        ("!serverinfo", "Basic server info."),
+        ("!latencycheck", "Detailed latency (Admin/#latency)."),
+        ("!ban @user [reason]", "Ban a user (Ban Members)."),
+        ("!kick @user [reason]", "Kick a user (Kick Members)."),
+        ("!mute @user [reason]", "Mute by role (Manage Roles)."),
+        ("!unmute @user", "Unmute a user."),
+        ("!join", "Bot joins your voice channel."),
+        ("!leave", "Bot leaves voice channel."),
+        ("!play <query|Spotify URL>", "Play music from YouTube or Spotify."),
+        ("!skip", "Skip current track."),
+        ("!pause", "Pause playback."),
+        ("!resume", "Resume playback."),
+        ("!current", "Show now playing."),
+    ]
+    for name, desc in cmds:
+        embed.add_field(name=name, value=desc, inline=False)
     await ctx.send(embed=embed)
+
+# --- Music helper functions & commands ---
+
+async def ensure_queue(ctx):
+    if ctx.guild.id not in music_queues:
+        music_queues[ctx.guild.id] = deque()
+        current_track[ctx.guild.id] = None
+
+async def play_next(ctx):
+    q = music_queues[ctx.guild.id]
+    if not q:
+        current_track[ctx.guild.id] = None
+        return
+    query = q.popleft()
+    source = await YTDLSource.from_query(query, loop=bot.loop, stream=True)
+    current_track[ctx.guild.id] = source.title
+    vc = ctx.voice_client
+    vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
+
+@bot.command()
+async def join(ctx):
+    if not ctx.author.voice or not ctx.author.voice.channel:
+        return await ctx.send("You need to be in a voice channel first.")
+    ch = ctx.author.voice.channel
+    if ctx.voice_client:
+        await ctx.voice_client.move_to(ch)
+    else:
+        await ch.connect()
+    await ctx.send(f"🔗 Joined **{ch.name}**")
+
+@bot.command()
+async def leave(ctx):
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect()
+        await ctx.send("🔌 Disconnected.")
+    else:
+        await ctx.send("I’m not in a voice channel.")
+
+@bot.command()
+async def play(ctx, *, query: str):
+    await ensure_queue(ctx)
+    if "open.spotify.com/playlist" in query:
+        pid = query.split("/")[-1].split("?")[0]
+        items = spotify.playlist_items(pid, fields="items.track.name,items.track.artists.name")["items"]
+        if not items:
+            return await ctx.send("No tracks in that playlist.")
+        await ctx.send(f"🔁 Enqueuing {len(items)} tracks…")
+        for it in items:
+            t = it["track"]
+            music_queues[ctx.guild.id].append(f"{t['name']} {t['artists'][0]['name']}")
+    elif "open.spotify.com/track" in query:
+        tid = query.split("/")[-1].split("?")[0]
+        t = spotify.track(tid)
+        music_queues[ctx.guild.id].append(f"{t['name']} {t['artists'][0]['name']}")
+    else:
+        music_queues[ctx.guild.id].append(query)
+
+    if not ctx.voice_client:
+        if not ctx.author.voice:
+            return await ctx.send("Join a voice channel first.")
+        await ctx.author.voice.channel.connect()
+
+    vc = ctx.voice_client
+    if not vc.is_playing():
+        await ctx.send("▶️ Starting playback…")
+        await play_next(ctx)
+    else:
+        pos = len(music_queues[ctx.guild.id])
+        await ctx.send(f"➕ Added to queue (position {pos}).")
+
+@bot.command()
+async def skip(ctx):
+    vc = ctx.voice_client
+    if vc and vc.is_playing():
+        vc.stop()
+        await ctx.send("⏭️ Skipped.")
+    else:
+        await ctx.send("Nothing is playing.")
+
+@bot.command()
+async def pause(ctx):
+    vc = ctx.voice_client
+    if vc and vc.is_playing():
+        vc.pause()
+        await ctx.send("⏸️ Paused.")
+    else:
+        await ctx.send("Nothing to pause.")
+
+@bot.command()
+async def resume(ctx):
+    vc = ctx.voice_client
+    if vc and vc.is_paused():
+        vc.resume()
+        await ctx.send("▶️ Resumed.")
+    else:
+        await ctx.send("Nothing is paused.")
+
+@bot.command(name="current")
+async def current(ctx):
+    title = current_track.get(ctx.guild.id)
+    if title:
+        await ctx.send(f"🎶 Now playing: **{title}**")
+    else:
+        await ctx.send("Nothing is playing right now.")
 
 # --- Message handling & error logging ---
 
@@ -497,14 +537,14 @@ async def help(ctx):
 async def on_message(message):
     if message.author == bot.user:
         return
-    logger.debug("📩 Received message: %s", message.content)
+    logger.debug("📩 %s", message.content)
     await bot.process_commands(message)
 
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
         return
-    logger.error("Error in command '%s': %s", ctx.command, error)
+    logger.error("Error in '%s': %s", ctx.command, error)
     await ctx.send(f"⚠️ An error occurred: {error}")
 
 keep_alive()
