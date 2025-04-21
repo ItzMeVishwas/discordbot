@@ -3,3 +3,6 @@ flask
 requests
 aiohttp
 asyncio
+spotipy
+youtube_dl
+PyNaCl
