@@ -8,6 +8,7 @@ import asyncio
 
 import discord
 from discord.ext import commands, tasks
+from discord.ext.commands import BucketType
 from collections import defaultdict
 
 from keep_alive import keep_alive
@@ -24,8 +25,22 @@ intents.voice_states    = True
 
 bot = commands.Bot(command_prefix="!", help_command=None, intents=intents)
 
-YOUR_USER_ID = 748964469039824937  # Your Discord user ID
-POINTS_FILE   = "stream_points.json"
+YOUR_USER_ID = 748964469039824937
+POINTS_FILE  = "stream_points.json"
+
+# ─── Rate-Limit-Safe Send ──────────────────────────────────
+async def safe_send(dest, *args, **kwargs):
+    backoff = 1
+    while True:
+        try:
+            return await dest.send(*args, **kwargs)
+        except discord.HTTPException as e:
+            if getattr(e, "status", None) == 429:
+                logger.warning(f"Rate-limited; backing off {backoff}s")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff*2, 60)
+                continue
+            raise
 
 # ─── Stream-Points Persistence ─────────────────────────────
 def load_points():
@@ -51,13 +66,12 @@ session_start_points = {}
 # ─── Bot Events ────────────────────────────────────────────
 @bot.event
 async def on_ready():
-    logger.info("✅ %s is online and ready!", bot.user)
-    # Notify owner
+    logger.info("✅ %s is online!", bot.user)
     try:
         owner = await bot.fetch_user(YOUR_USER_ID)
-        await owner.send("✅ **Bot is now online and operational.**")
+        await safe_send(owner, "**✅ Bot is now online and operational.**")
     except Exception as e:
-        logger.error("❌ Could not send startup DM: %s", e)
+        logger.error("❌ Could not notify owner: %s", e)
     add_stream_points.start()
 
 @bot.event
@@ -75,39 +89,37 @@ async def on_presence_update(before, after):
                 color=0x00FFCC,
                 timestamp=datetime.datetime.utcnow()
             )
-            await owner.send(embed=embed)
+            await safe_send(owner, embed=embed)
         except Exception as e:
             logger.error("❌ Presence DM failed: %s", e)
 
 @bot.event
 async def on_voice_state_update(member, before, after):
+    channel = discord.utils.get(member.guild.text_channels, name="general")
     # Stream start
     if not before.self_stream and after.self_stream:
         streaming_users.add(member.id)
         session_start_points[member.id] = stream_points.get(str(member.id), 0)
-        channel = discord.utils.get(member.guild.text_channels, name="general")
         if channel:
-            await channel.send(f"🎥 **{member.name}** has begun streaming. Earning points now!")
+            await safe_send(channel, f"🎥 **{member.name}** has begun streaming and is earning points.")
     # Stream stop
     elif before.self_stream and not after.self_stream and member.id in streaming_users:
         total   = stream_points.get(str(member.id), 0)
-        started = session_start_points.get(member.id, total)
+        started = session_start_points.pop(member.id, total)
         earned  = total - started
-        channel = discord.utils.get(member.guild.text_channels, name="general")
+        streaming_users.discard(member.id)
+        save_points(stream_points)
         if channel:
             embed = discord.Embed(
                 title="🎉 Streaming Session Complete",
                 description=(
-                    f"**{member.name}** has finished streaming and earned **{earned}** points.\n"
+                    f"**{member.name}** ended their stream and earned **{earned}** points.\n"
                     f"• **Lifetime Total:** {total} points"
                 ),
                 color=0xFFD700,
                 timestamp=datetime.datetime.utcnow()
             )
-            await channel.send(embed=embed)
-        streaming_users.discard(member.id)
-        session_start_points.pop(member.id, None)
-        save_points(stream_points)
+            await safe_send(channel, embed=embed)
 
 # ─── Background Task ───────────────────────────────────────
 @tasks.loop(seconds=60)
@@ -117,17 +129,19 @@ async def add_stream_points():
     save_points(stream_points)
 
 # ─── Stream-Points Commands ────────────────────────────────
-@bot.command(name="balance")
+@bot.command()
+@commands.cooldown(1, 10, BucketType.user)
 async def balance(ctx):
     pts = stream_points.get(str(ctx.author.id), 0)
     embed = discord.Embed(
         title="💰 Stream Points Balance",
-        description=f"{ctx.author.mention}, you currently have **{pts}** points.",
+        description=f"{ctx.author.mention}, you have **{pts}** points.",
         color=0x00CCFF
     )
-    await ctx.send(embed=embed)
+    await safe_send(ctx, embed=embed)
 
-@bot.command(name="leaderboard")
+@bot.command()
+@commands.cooldown(1, 15, BucketType.user)
 async def leaderboard(ctx):
     top5 = sorted(stream_points.items(), key=lambda i: i[1], reverse=True)[:5]
     embed = discord.Embed(
@@ -140,17 +154,18 @@ async def leaderboard(ctx):
     else:
         for i, (uid, pts) in enumerate(top5, start=1):
             user = await bot.fetch_user(int(uid))
-            embed.add_field(name=f"{i}. {user.name}", value=f"{pts} points", inline=False)
-    await ctx.send(embed=embed)
+            embed.add_field(name=f"{i}. {user.name}", value=f"{pts} pts", inline=False)
+    await safe_send(ctx, embed=embed)
 
 @bot.command(name="transferpoints")
+@commands.cooldown(1, 30, BucketType.user)
 async def transferpoints(ctx):
     embed = discord.Embed(
-        title="🔄 Transfer Points",
+        title="🔄 Transferring Points",
         description="Transferring your points to the official tracker...",
         color=0xCCCCCC
     )
-    msg = await ctx.send(embed=embed)
+    msg = await safe_send(ctx, embed=embed)
     await asyncio.sleep(1)
     stream_points[str(ctx.author.id)] = 0
     save_points(stream_points)
@@ -160,26 +175,20 @@ async def transferpoints(ctx):
     await msg.edit(embed=embed)
 
 # ─── Moderation Commands ───────────────────────────────────
-@bot.command(name="purge")
+@bot.command()
 @commands.has_permissions(manage_messages=True)
 async def purge(ctx, amount: int):
     if amount < 1:
-        return await ctx.send("❌ Please specify a number greater than 0.")
-    to_delete = [m async for m in ctx.channel.history(limit=amount, before=ctx.message)]
-    if not to_delete:
-        return await ctx.send("ℹ️ No messages found to delete.")
-    try:
-        await ctx.channel.delete_messages(to_delete)
-        embed = discord.Embed(
-            title="🧹 Purge Successful",
-            description=f"Deleted **{len(to_delete)}** messages.",
-            color=0xFF0000
-        )
-        await ctx.send(embed=embed, delete_after=5)
-    except Exception as e:
-        await ctx.send(f"❌ Purge failed: {e}")
+        return await safe_send(ctx, "❌ Please specify a number greater than 0.")
+    deleted = await ctx.channel.purge(limit=amount, before=ctx.message)
+    embed = discord.Embed(
+        title="🧹 Purge Complete",
+        description=f"Deleted **{len(deleted)}** messages.",
+        color=0xFF0000
+    )
+    await safe_send(ctx, embed=embed, delete_after=5)
 
-@bot.command(name="ban")
+@bot.command()
 @commands.has_permissions(ban_members=True)
 async def ban(ctx, member: discord.Member, *, reason: str = "No reason provided"):
     try:
@@ -189,11 +198,11 @@ async def ban(ctx, member: discord.Member, *, reason: str = "No reason provided"
             description=f"**{member}** has been banned.\n• **Reason:** {reason}",
             color=0x990000
         )
-        await ctx.send(embed=embed)
+        await safe_send(ctx, embed=embed)
     except Exception as e:
-        await ctx.send(f"❌ Failed to ban {member}: {e}")
+        await safe_send(ctx, f"❌ Failed to ban {member}: {e}")
 
-@bot.command(name="kick")
+@bot.command()
 @commands.has_permissions(kick_members=True)
 async def kick(ctx, member: discord.Member, *, reason: str = "No reason provided"):
     try:
@@ -203,41 +212,41 @@ async def kick(ctx, member: discord.Member, *, reason: str = "No reason provided
             description=f"**{member}** has been kicked.\n• **Reason:** {reason}",
             color=0x996600
         )
-        await ctx.send(embed=embed)
+        await safe_send(ctx, embed=embed)
     except Exception as e:
-        await ctx.send(f"❌ Failed to kick {member}: {e}")
+        await safe_send(ctx, f"❌ Failed to kick {member}: {e}")
 
-@bot.command(name="mute")
+@bot.command()
 @commands.has_permissions(manage_roles=True)
 async def mute(ctx, member: discord.Member, *, reason: str = "No reason provided"):
-    muted_role = discord.utils.get(ctx.guild.roles, name="Muted")
-    if not muted_role:
-        muted_role = await ctx.guild.create_role(name="Muted", reason="Auto-created for muting")
+    role = discord.utils.get(ctx.guild.roles, name="Muted")
+    if not role:
+        role = await ctx.guild.create_role(name="Muted", reason="Auto-created")
         for ch in ctx.guild.channels:
-            await ch.set_permissions(muted_role, send_messages=False, speak=False, add_reactions=False)
-    if muted_role in member.roles:
-        return await ctx.send(f"ℹ️ {member.mention} is already muted.")
-    await member.add_roles(muted_role, reason=reason)
+            await ch.set_permissions(role, send_messages=False, speak=False, add_reactions=False)
+    if role in member.roles:
+        return await safe_send(ctx, f"ℹ️ {member.mention} is already muted.")
+    await member.add_roles(role, reason=reason)
     embed = discord.Embed(
         title="🔇 Member Muted",
         description=f"**{member}** has been muted.\n• **Reason:** {reason}",
         color=0x555555
     )
-    await ctx.send(embed=embed)
+    await safe_send(ctx, embed=embed)
 
-@bot.command(name="unmute")
+@bot.command()
 @commands.has_permissions(manage_roles=True)
 async def unmute(ctx, member: discord.Member):
-    muted_role = discord.utils.get(ctx.guild.roles, name="Muted")
-    if not muted_role or muted_role not in member.roles:
-        return await ctx.send(f"ℹ️ {member.mention} is not muted.")
-    await member.remove_roles(muted_role)
+    role = discord.utils.get(ctx.guild.roles, name="Muted")
+    if not role or role not in member.roles:
+        return await safe_send(ctx, f"ℹ️ {member.mention} is not muted.")
+    await member.remove_roles(role)
     embed = discord.Embed(
         title="🔊 Member Unmuted",
         description=f"**{member}** has been unmuted.",
         color=0x00AAAA
     )
-    await ctx.send(embed=embed)
+    await safe_send(ctx, embed=embed)
 
 # ─── Error Handling & Launch ───────────────────────────────
 @bot.event
@@ -245,7 +254,7 @@ async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
         return
     logger.error("❌ Error in '%s': %s", ctx.command, error)
-    await ctx.send(f"⚠️ An error occurred: {error}")
+    await safe_send(ctx, f"⚠️ An error occurred: {error}")
 
 keep_alive()
 bot.run(os.getenv("TOKEN"))
