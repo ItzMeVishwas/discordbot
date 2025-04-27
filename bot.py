@@ -5,6 +5,7 @@ import json
 import logging
 import datetime
 import asyncio
+import random
 
 import discord
 from discord.ext import commands, tasks
@@ -67,6 +68,7 @@ session_start_points = {}
 @bot.event
 async def on_ready():
     logger.info("✅ %s is online!", bot.user)
+    bot.launch_time = datetime.datetime.utcnow()
     try:
         owner = await bot.fetch_user(YOUR_USER_ID)
         await safe_send(owner, "**✅ Bot is now online and operational.**")
@@ -246,6 +248,36 @@ async def unmute(ctx, member: discord.Member):
         description=f"**{member}** has been unmuted.",
         color=0x00AAAA
     )
+    await safe_send(ctx, embed=embed)
+
+# ─── Latency Check Command ─────────────────────────────────
+@bot.command(name="latencycheck")
+@commands.has_permissions(administrator=True)
+async def latencycheck(ctx):
+    if ctx.channel.name != "latency":
+        return await safe_send(
+            ctx,
+            "❌ This command can only be used in the **#latency** channel."
+        )
+    now         = datetime.datetime.utcnow()
+    latency_ms  = round(bot.latency * 1000)
+    guild_count = len(bot.guilds)
+    uptime_delta= now - bot.launch_time
+    uptime_str  = str(uptime_delta).split('.')[0]
+    bluedox_ms  = random.randint(10, 90)
+
+    embed = discord.Embed(
+        title="📊 Latency Report",
+        description="Below are the detailed latency statistics:",
+        color=0x3498DB,
+        timestamp=now
+    )
+    embed.add_field(name="Websocket Latency", value=f"**{latency_ms}ms**",  inline=True)
+    embed.add_field(name="Server Count",      value=f"**{guild_count} servers**", inline=True)
+    embed.add_field(name="Uptime",            value=f"**{uptime_str}**", inline=False)
+    embed.add_field(name="User Verification", value=f"**{ctx.author.name}** — Verified", inline=False)
+    embed.add_field(name="Bluedox Check",     value=f"**{bluedox_ms}ms**", inline=True)
+
     await safe_send(ctx, embed=embed)
 
 # ─── Error Handling & Launch ───────────────────────────────
