@@ -30,8 +30,9 @@ bot = commands.Bot(command_prefix="!", help_command=None, intents=intents)
 YOUR_USER_ID = 748964469039824937
 POINTS_FILE  = "stream_points.json"
 
-# ─── Presence DM Cooldown ──────────────────────────────────
-_last_presence_dm = {}                     # user_id -> datetime of last DM
+# ─── Cached owner user & presence-DM cooldown ───────────────
+owner_user = None
+_last_presence_dm = {}                    # user_id -> datetime of last DM
 _PRESENCE_COOLDOWN = timedelta(seconds=5)  # minimum interval between DMs per user
 
 # ─── Rate-Limit-Safe Send ──────────────────────────────────
@@ -72,11 +73,12 @@ session_start_points = {}
 # ─── Bot Events ────────────────────────────────────────────
 @bot.event
 async def on_ready():
+    global owner_user
     logger.info("✅ %s is online!", bot.user)
     bot.launch_time = dt.utcnow()
     try:
-        owner = await bot.fetch_user(YOUR_USER_ID)
-        await safe_send(owner, "**✅ Bot is now online and operational.**")
+        owner_user = await bot.fetch_user(YOUR_USER_ID)
+        await safe_send(owner_user, "**✅ Bot is now online and operational.**")
     except Exception as e:
         logger.error("❌ Could not notify owner: %s", e)
     add_stream_points.start()
@@ -89,26 +91,25 @@ async def on_presence_update(before, after):
 
     now = dt.utcnow()
     last = _last_presence_dm.get(after.id)
-    # If less than cooldown since last DM for this user, skip
     if last and (now - last) < _PRESENCE_COOLDOWN:
         return
-
     _last_presence_dm[after.id] = now
-    try:
-        owner = await bot.fetch_user(YOUR_USER_ID)
-        embed = discord.Embed(
-            title="⚡ Presence Update",
-            description=(
-                f"User **{after.name}** changed status:\n"
-                f"• **Before:** {before.status}\n"
-                f"• **After:**  {after.status}"
-            ),
-            color=0x00FFCC,
-            timestamp=now
-        )
-        await safe_send(owner, embed=embed)
-    except Exception as e:
-        logger.error("❌ Presence DM failed: %s", e)
+
+    if owner_user:
+        try:
+            embed = discord.Embed(
+                title="⚡ Presence Update",
+                description=(
+                    f"User **{after.name}** changed status:\n"
+                    f"• **Before:** {before.status}\n"
+                    f"• **After:**  {after.status}"
+                ),
+                color=0x00FFCC,
+                timestamp=now
+            )
+            await safe_send(owner_user, embed=embed)
+        except Exception as e:
+            logger.error("❌ Presence DM failed: %s", e)
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -287,11 +288,11 @@ async def latencycheck(ctx):
         color=0x3498DB,
         timestamp=now
     )
-    embed.add_field(name="Websocket Latency", value=f"**{latency_ms}ms**",  inline=True)
-    embed.add_field(name="Server Count",      value=f"**{guild_count} servers**", inline=True)
-    embed.add_field(name="Uptime",            value=f"**{uptime_str}**", inline=False)
-    embed.add_field(name="User Verification", value=f"**{ctx.author.name}** — Verified", inline=False)
-    embed.add_field(name="Bluedox Check",     value=f"**{bluedox_ms}ms**", inline=True)
+    embed.add_field(name="Websocket Latency",    value=f"**{latency_ms}ms**",   inline=True)
+    embed.add_field(name="Server Count",         value=f"**{guild_count} servers**", inline=True)
+    embed.add_field(name="Uptime",               value=f"**{uptime_str}**",    inline=False)
+    embed.add_field(name="User Verification",    value=f"**{ctx.author.name}** — Verified", inline=False)
+    embed.add_field(name="Bluedox Check",        value=f"**{bluedox_ms}ms**",  inline=True)
 
     await safe_send(ctx, embed=embed)
 
