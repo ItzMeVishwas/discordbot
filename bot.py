@@ -11,6 +11,7 @@ import discord
 from discord.ext import commands, tasks
 from discord.ext.commands import BucketType
 from collections import defaultdict
+from datetime import datetime as dt, timedelta
 
 from keep_alive import keep_alive
 
@@ -29,6 +30,10 @@ bot = commands.Bot(command_prefix="!", help_command=None, intents=intents)
 YOUR_USER_ID = 748964469039824937
 POINTS_FILE  = "stream_points.json"
 
+# ─── Presence DM Cooldown ──────────────────────────────────
+_last_presence_dm = {}                     # user_id -> datetime of last DM
+_PRESENCE_COOLDOWN = timedelta(seconds=5)  # minimum interval between DMs per user
+
 # ─── Rate-Limit-Safe Send ──────────────────────────────────
 async def safe_send(dest, *args, **kwargs):
     backoff = 1
@@ -39,7 +44,7 @@ async def safe_send(dest, *args, **kwargs):
             if getattr(e, "status", None) == 429:
                 logger.warning(f"Rate-limited; backing off {backoff}s")
                 await asyncio.sleep(backoff)
-                backoff = min(backoff*2, 60)
+                backoff = min(backoff * 2, 60)
                 continue
             raise
 
@@ -68,7 +73,7 @@ session_start_points = {}
 @bot.event
 async def on_ready():
     logger.info("✅ %s is online!", bot.user)
-    bot.launch_time = datetime.datetime.utcnow()
+    bot.launch_time = dt.utcnow()
     try:
         owner = await bot.fetch_user(YOUR_USER_ID)
         await safe_send(owner, "**✅ Bot is now online and operational.**")
@@ -78,22 +83,32 @@ async def on_ready():
 
 @bot.event
 async def on_presence_update(before, after):
-    if before.status != after.status:
-        try:
-            owner = await bot.fetch_user(YOUR_USER_ID)
-            embed = discord.Embed(
-                title="⚡ Presence Update",
-                description=(
-                    f"User **{after.name}** changed status:\n"
-                    f"• **Before:** {before.status}\n"
-                    f"• **After:** {after.status}"
-                ),
-                color=0x00FFCC,
-                timestamp=datetime.datetime.utcnow()
-            )
-            await safe_send(owner, embed=embed)
-        except Exception as e:
-            logger.error("❌ Presence DM failed: %s", e)
+    # Only when status actually changes
+    if before.status == after.status:
+        return
+
+    now = dt.utcnow()
+    last = _last_presence_dm.get(after.id)
+    # If less than cooldown since last DM for this user, skip
+    if last and (now - last) < _PRESENCE_COOLDOWN:
+        return
+
+    _last_presence_dm[after.id] = now
+    try:
+        owner = await bot.fetch_user(YOUR_USER_ID)
+        embed = discord.Embed(
+            title="⚡ Presence Update",
+            description=(
+                f"User **{after.name}** changed status:\n"
+                f"• **Before:** {before.status}\n"
+                f"• **After:**  {after.status}"
+            ),
+            color=0x00FFCC,
+            timestamp=now
+        )
+        await safe_send(owner, embed=embed)
+    except Exception as e:
+        logger.error("❌ Presence DM failed: %s", e)
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -119,7 +134,7 @@ async def on_voice_state_update(member, before, after):
                     f"• **Lifetime Total:** {total} points"
                 ),
                 color=0xFFD700,
-                timestamp=datetime.datetime.utcnow()
+                timestamp=dt.utcnow()
             )
             await safe_send(channel, embed=embed)
 
@@ -149,7 +164,7 @@ async def leaderboard(ctx):
     embed = discord.Embed(
         title="🏆 Stream Points Leaderboard",
         color=0xFF5500,
-        timestamp=datetime.datetime.utcnow()
+        timestamp=dt.utcnow()
     )
     if not top5:
         embed.description = "No points have been earned yet."
@@ -259,7 +274,7 @@ async def latencycheck(ctx):
             ctx,
             "❌ This command can only be used in the **#latency** channel."
         )
-    now         = datetime.datetime.utcnow()
+    now         = dt.utcnow()
     latency_ms  = round(bot.latency * 1000)
     guild_count = len(bot.guilds)
     uptime_delta= now - bot.launch_time
